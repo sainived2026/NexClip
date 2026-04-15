@@ -60,8 +60,21 @@ if [ ! -d "$VENV" ]; then
 fi
 source "$VENV/bin/activate"
 pip install -q --upgrade pip
-pip install -q -r requirements.txt
-echo "✓ Python dependencies ready"
+
+# Requirements live in backend/requirements.txt
+REQ_FILE="$NEXCLIP_DIR/backend/requirements.txt"
+if [ -f "$REQ_FILE" ]; then
+    pip install -q -r "$REQ_FILE"
+    echo "✓ Python dependencies ready (from backend/requirements.txt)"
+else
+    echo "  WARNING: requirements file not found at $REQ_FILE"
+    echo "  Trying to install core packages directly..."
+    pip install -q fastapi uvicorn[standard] sqlalchemy aiosqlite celery[redis] \
+        redis python-jose[cryptography] passlib[bcrypt] openai google-genai \
+        anthropic python-dotenv pydantic pydantic-settings httpx requests \
+        aiofiles aiohttp anyio psutil loguru rich tenacity PyYAML
+    echo "✓ Core packages installed"
+fi
 
 # ════════════════════════════════════
 # STEP 4 — Python syntax check
