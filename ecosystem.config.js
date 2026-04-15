@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "nexclip-backend",
-      script: "venv/bin/uvicorn",
+      script: "../venv/bin/uvicorn",
       args: "app.main:app --host 0.0.0.0 --port 8000",
       cwd: "./backend",
       interpreter: "none",
@@ -12,7 +12,7 @@ module.exports = {
     },
     {
       name: "nexclip-celery",
-      script: "venv/bin/celery",
+      script: "../venv/bin/celery",
       args: "-A app.workers.celery_app worker --loglevel=info --concurrency=4",
       cwd: "./backend",
       interpreter: "none",
@@ -22,7 +22,7 @@ module.exports = {
     },
     {
       name: "nexclip-nex-agent",
-      script: "venv/bin/python",
+      script: "../venv/bin/python",
       args: "server.py",
       cwd: "./nex_agent",
       interpreter: "none",
@@ -42,7 +42,7 @@ module.exports = {
     },
     {
       name: "nexclip-arc-agent",
-      script: "venv/bin/python",
+      script: "../../venv/bin/python",
       args: "server.py",
       cwd: "./nexearch/arc",
       interpreter: "none",

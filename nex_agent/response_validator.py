@@ -298,22 +298,13 @@ class ResponseValidator:
         think_matches = re.findall(
             r"<think>(.*?)</think>", raw_text, re.DOTALL | re.IGNORECASE
         )
-        text = raw_text
-        if think_matches:
-            for m in think_matches:
-                thinking_parts.append(m.strip())
-            text = re.sub(
-                r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
-            ).strip()
-            
-            # Since the model used tags, we TRUST the tags and skip fallback heuristics
-            thinking_str = "\n\n".join(t for t in thinking_parts if t)
-            text = re.sub(r"^\s*(Nex|Arc):\s*", "", text, flags=re.IGNORECASE).strip()
-            if not text:
-                return thinking_str, "I hit an internal formatting issue. Please try again."
-            return thinking_str, text
+        for m in think_matches:
+            thinking_parts.append(m.strip())
+        text = re.sub(
+            r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
+        ).strip()
 
-        # ── 2. Check for leaked structure (if no tags used) ──────────
+        # ── 2. Check for leaked structure ────────────────────────────
         text_lower = text.lower()
         has_leaked = any(
             text_lower.lstrip().startswith(p.lower())
@@ -324,7 +315,8 @@ class ResponseValidator:
         if not has_leaked:
             # Clean response — strip role prefix and return
             text = re.sub(r"^\s*(Nex|Arc):\s*", "", text, flags=re.IGNORECASE)
-            return "", text
+            thinking_str = "\n\n".join(t for t in thinking_parts if t)
+            return thinking_str, text
 
         # ── 3. Backwards scan ────────────────────────────────────────
         lines = text.split("\n")
@@ -410,30 +402,22 @@ class ResponseValidator:
     ) -> tuple[str, str]:
         """
         Build a safe `(thinking_content, final_answer)` pair for chat UIs.
-
-        This is stricter than `extract_thinking_and_clean()`: if extraction
-        fails, we try progressively safer fallbacks instead of failing open
-        and sending leaked prompt text to the user.
+        
+        Since we now enforce the <think>...</think> protocol in the system prompt,
+        we fully trust that if extraction leaves a clean block, it is exactly what
+        the model intended to say. We no longer apply heuristic rejection logic.
         """
         thinking, clean = self.extract_thinking_and_clean(raw_text)
         clean = re.sub(r"^\s*(Nex|Arc):\s*", "", (clean or "").strip(), flags=re.IGNORECASE)
         thinking = (thinking or "").strip()
 
-        if clean and not self._looks_like_internal_reasoning(clean):
+        # If extraction left us with a clean string, we trust it implicitly.
+        if clean:
             return thinking, clean
 
-        stripped = self.strip_thinking_tokens(raw_text or "").strip()
-        stripped = re.sub(r"^\s*(Nex|Arc):\s*", "", stripped, flags=re.IGNORECASE).strip()
-        if stripped and not self._looks_like_internal_reasoning(stripped):
-            if not thinking and raw_text and stripped != (raw_text or "").strip():
-                thinking = (raw_text or "").strip()
-            return thinking, stripped
-
-        if raw_text and self._looks_like_internal_reasoning(raw_text):
-            return (raw_text or "").strip(), fallback_message
-
-        final_text = (clean or stripped or raw_text or fallback_message).strip()
-        return thinking, final_text or fallback_message
+        # If we failed to extract any clean text (e.g. the entire response was
+        # trapped inside a think block with no final answer), we use fallback.
+        return thinking or raw_text, fallback_message
 
     def build_visible_reasoning(
         self,

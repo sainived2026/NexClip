@@ -24,6 +24,7 @@ interface Message {
     status: "streaming" | "complete" | "error";
     error_detail?: string;
     thinking?: string;  // collapsible reasoning content
+    rawContent?: string; // raw buffer for <think> tag extraction
 }
 
 interface Conversation {

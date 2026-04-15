@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -12,9 +12,9 @@ import { MarkdownRenderer } from "@/components/nex/MarkdownRenderer";
 import { ModelIndicator } from "@/components/nex/ModelIndicator";
 import "./arc-styles.css";
 
-/* ═══════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    TYPES
-   ═══════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 interface Message {
     id: string;
@@ -24,6 +24,7 @@ interface Message {
     status: "streaming" | "complete" | "error";
     error_detail?: string;
     thinking?: string;  // collapsible reasoning content
+    raw_buffer?: string; // raw tokens for parsing
 }
 
 interface Conversation {
@@ -71,9 +72,9 @@ function buildToolThinkingLabel(data: any): string {
 const ARC_API = "http://localhost:8003/api";
 const ARC_WS = "ws://localhost:8003/ws/chat";
 
-/* ═══════════════════════════════════════════════════════════════
-   ANIMATED AVATAR (SVG — Purple Pentagon)
-   ═══════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   ANIMATED AVATAR (SVG â€” Purple Pentagon)
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 function ArcAvatar({ state = "idle", size = 48 }: { state?: string; size?: number }) {
     const cls = `arc-avatar-${state}`;
@@ -112,21 +113,16 @@ function ArcAvatar({ state = "idle", size = 48 }: { state?: string; size?: numbe
     );
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   THINKING BLOCK — collapsible reasoning disclosure
-   ═══════════════════════════════════════════════════════════════ */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+   THINKING BLOCK â€” collapsible reasoning disclosure
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
-function ThinkingBlock({ thinking, accentColor = "#8B5CF6", isStreaming = false }: { thinking: string; accentColor?: string; isStreaming?: boolean }) {
-    const [open, setOpen] = useState(isStreaming);
+function ThinkingBlock({ thinking, accentColor = "#8B5CF6", streaming = false }: { thinking: string; accentColor?: string; streaming?: boolean }) {
+    const [open, setOpen] = useState(streaming);
 
     useEffect(() => {
-        if (isStreaming) {
-            setOpen(true);
-        } else if (!isStreaming && thinking.trim().length > 0) {
-            const t = setTimeout(() => setOpen(false), 600);
-            return () => clearTimeout(t);
-        }
-    }, [isStreaming, thinking]);
+        setOpen(streaming);
+    }, [streaming]);
 
     if (!thinking || !thinking.trim()) return null;
     return (
@@ -165,7 +161,7 @@ function ThinkingBlock({ thinking, accentColor = "#8B5CF6", isStreaming = false 
                     borderRadius: "50%",
                     background: `${accentColor}25`,
                     fontSize: 8,
-                }}>💭</span>
+                }}>ðŸ’­</span>
                 Thinking
                 <ChevronDown
                     size={12}
@@ -200,9 +196,9 @@ function ThinkingBlock({ thinking, accentColor = "#8B5CF6", isStreaming = false 
     );
 }
 
-/* ═══════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    QUICK ACTIONS
-   ═══════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 const QUICK_ACTIONS = [
     { icon: Zap, label: "System Status", prompt: "Show me the full Nexearch system status." },
@@ -214,12 +210,12 @@ const QUICK_ACTIONS = [
     { icon: Activity, label: "Activity Log", prompt: "Show the activity log for today." },
 ];
 
-/* ═══════════════════════════════════════════════════════════════
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
    MAIN PAGE COMPONENT
-   ═══════════════════════════════════════════════════════════════ */
+   â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
 export default function ArcAgentPage() {
-    /* ── State ─────────────────────────────────────────────────── */
+    /* â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeConvId, setActiveConvId] = useState<string>("");
     const [messages, setMessages] = useState<Message[]>([]);
@@ -248,7 +244,7 @@ export default function ArcAgentPage() {
         convIdRef.current = activeConvId;
     }, [messages, activeConvId]);
 
-    /* ── Helpers ────────────────────────────────────────────────── */
+    /* â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const genId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
     const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -256,7 +252,7 @@ export default function ArcAgentPage() {
         setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
     }, []);
 
-    /* ── Load conversations ──────────────────────────────────── */
+    /* â”€â”€ Load conversations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const loadConversations = useCallback(async () => {
         try {
             const res = await arcAgentAPI.listConversations();
@@ -265,7 +261,7 @@ export default function ArcAgentPage() {
         } catch { return []; }
     }, []);
 
-    /* ── Load messages for a conversation ────────────────────── */
+    /* â”€â”€ Load messages for a conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const loadMessages = useCallback(async (convId: string) => {
         try {
             const res = await arcAgentAPI.getMessages(convId);
@@ -283,7 +279,7 @@ export default function ArcAgentPage() {
         } catch { setMessages([]); }
     }, [scrollToBottom]);
 
-    /* ── Create new conversation ──────────────────────────────── */
+    /* â”€â”€ Create new conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const newConversation = useCallback(async () => {
         try {
             const res = await arcAgentAPI.createConversation();
@@ -302,7 +298,7 @@ export default function ArcAgentPage() {
         }
     }, [loadConversations]);
 
-    /* ── Initialize ────────────────────────────────────────────── */
+    /* â”€â”€ Initialize â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     useEffect(() => {
         const init = async () => {
             const convs = await loadConversations();
@@ -316,12 +312,12 @@ export default function ArcAgentPage() {
         init();
     }, [loadConversations, loadMessages, newConversation]);
 
-    /* ── When active conversation changes, load its messages ── */
+    /* â”€â”€ When active conversation changes, load its messages â”€â”€ */
     useEffect(() => {
         if (activeConvId) loadMessages(activeConvId);
     }, [activeConvId, loadMessages]);
 
-    /* ── Fetch status and model ───────────────────────────────── */
+    /* â”€â”€ Fetch status and model â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     useEffect(() => {
         const fetchInfo = async () => {
             try {
@@ -341,7 +337,7 @@ export default function ArcAgentPage() {
         return () => clearInterval(interval);
     }, []);
 
-    /* ── WebSocket connection with reconnection ───────────────── */
+    /* â”€â”€ WebSocket connection with reconnection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const connectWs = useCallback(() => {
         if (!activeConvId) return;
         if (
@@ -396,7 +392,7 @@ export default function ArcAgentPage() {
         };
     }, [connectWs, activeConvId]);
 
-    /* ── Reconnect on tab visibility change ──────────────────── */
+    /* â”€â”€ Reconnect on tab visibility change â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     useEffect(() => {
         const handleVisibility = () => {
             if (document.visibilityState === "visible" && !wsConnected) connectWs();
@@ -405,7 +401,7 @@ export default function ArcAgentPage() {
         return () => document.removeEventListener("visibilitychange", handleVisibility);
     }, [connectWs, wsConnected]);
 
-    /* ── Handle incoming WebSocket messages ───────────────────── */
+    /* â”€â”€ Handle incoming WebSocket messages â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const handleWsMessage = useCallback((data: any) => {
         const type = data.type;
         const messageId = data.message_id;
@@ -419,7 +415,7 @@ export default function ArcAgentPage() {
                     m.id === localId ? { ...m, id: serverId, thinking: m.thinking || "- Preparing response" } : m
                 ));
             } else if (!localId) {
-                // No local placeholder — create one (fallback)
+                // No local placeholder â€” create one (fallback)
                 setMessages(prev => [...prev, {
                     id: serverId, role: "assistant", content: "", timestamp: now(), status: "streaming", thinking: "- Preparing response",
                 }]);
@@ -430,18 +426,23 @@ export default function ArcAgentPage() {
         } else if (type === "token") {
             setMessages(prev => prev.map(m => {
                 if (m.id === messageId) {
-                    const incomingToken = data.token || data.content || "";
-                    const raw = (m.rawContent || m.content) + incomingToken;
-                    let newContent = raw;
-                    let newThinking = m.thinking || "";
-                    
-                    const thinkMatch = raw.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
-                    if (thinkMatch) {
-                        newThinking = thinkMatch[1].trim();
-                        newContent = raw.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, "").trim();
+                    const rawBuffer = (m.raw_buffer !== undefined ? m.raw_buffer : m.content) + (data.token || data.content || "");
+                    let thinkingContent = m.thinking || "";
+                    let cleanContent = rawBuffer;
+
+                    const thinkStart = rawBuffer.indexOf("<think>");
+                    if (thinkStart !== -1) {
+                        const thinkEnd = rawBuffer.indexOf("</think>", thinkStart);
+                        if (thinkEnd !== -1) {
+                            thinkingContent = rawBuffer.slice(thinkStart + 7, thinkEnd).trim();
+                            cleanContent = rawBuffer.slice(0, thinkStart) + rawBuffer.slice(thinkEnd + 8);
+                        } else {
+                            thinkingContent = rawBuffer.slice(thinkStart + 7).trim();
+                            cleanContent = rawBuffer.slice(0, thinkStart);
+                        }
                     }
-                    
-                    return { ...m, rawContent: raw, content: newContent, thinking: newThinking };
+
+                    return { ...m, content: cleanContent, thinking: thinkingContent || m.thinking, raw_buffer: rawBuffer, status: "streaming" };
                 }
                 return m;
             }));
@@ -524,7 +525,7 @@ export default function ArcAgentPage() {
         }
     }, [scrollToBottom, loadConversations]);
 
-    /* ── Send message via WebSocket ───────────────────────────── */
+    /* â”€â”€ Send message via WebSocket â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const sendMessage = async (text?: string) => {
         const msg = (text || input).trim();
         if (!msg || isStreaming) return;
@@ -555,7 +556,7 @@ export default function ArcAgentPage() {
         }
     };
 
-    /* ── SSE fallback ─────────────────────────────────────────── */
+    /* â”€â”€ SSE fallback â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const sendViaSse = async (msg: string) => {
         const aId = genId();
         setMessages(prev => [...prev, { id: aId, role: "assistant", content: "", timestamp: now(), status: "streaming", thinking: "- Preparing response" }]);
@@ -583,12 +584,12 @@ export default function ArcAgentPage() {
         }
     };
 
-    /* ── Keyboard ─────────────────────────────────────────────── */
+    /* â”€â”€ Keyboard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     };
 
-    /* ── Delete conversation ──────────────────────────────────── */
+    /* â”€â”€ Delete conversation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const deleteConversation = async (id: string) => {
         try { await arcAgentAPI.deleteConversation(id); } catch { }
         const updated = conversations.filter(c => c.id !== id);
@@ -599,7 +600,7 @@ export default function ArcAgentPage() {
         }
     };
 
-    /* ── Retry failed message ─────────────────────────────────── */
+    /* â”€â”€ Retry failed message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const retryMessage = (messageId: string) => {
         const idx = messages.findIndex(m => m.id === messageId);
         if (idx > 0 && messages[idx - 1].role === "user") {
@@ -609,14 +610,14 @@ export default function ArcAgentPage() {
         }
     };
 
-    /* ── Copy message ─────────────────────────────────────────── */
+    /* â”€â”€ Copy message â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const copyMessage = (content: string, id: string) => {
         navigator.clipboard.writeText(content);
         setCopied(id);
         setTimeout(() => setCopied(null), 2000);
     };
 
-    /* ── Time grouping ────────────────────────────────────────── */
+    /* â”€â”€ Time grouping â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
     const groupByTime = (convs: Conversation[]) => {
         const groups: { label: string; items: Conversation[] }[] = [];
         const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -641,14 +642,14 @@ export default function ArcAgentPage() {
         return groups;
     };
 
-    /* ═══════════════════════════════════════════════════════════════
+    /* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
        RENDER
-       ═══════════════════════════════════════════════════════════════ */
+       â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 
     return (
         <div className="flex" style={{ height: "100vh", background: "var(--arc-bg-base)", overflow: "hidden" }}>
 
-            {/* ── Conversation Sidebar ──────────────────────────── */}
+            {/* â”€â”€ Conversation Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             <div className="flex flex-col border-r arc-scroll"
                 style={{ width: sidebarOpen ? 240 : 0, minWidth: sidebarOpen ? 240 : 0, background: "var(--arc-bg-surface)", borderColor: "var(--arc-border-subtle)", transition: "all 0.2s ease", overflow: "hidden" }}>
 
@@ -686,7 +687,7 @@ export default function ArcAgentPage() {
                 </div>
             </div>
 
-            {/* ── Main Chat Area ────────────────────────────────── */}
+            {/* â”€â”€ Main Chat Area â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
             <div className="flex-1 flex flex-col" style={{ overflow: "hidden" }}>
 
                 {/* Header */}
@@ -710,7 +711,7 @@ export default function ArcAgentPage() {
                                 </span>
                             </div>
                             <div className="flex items-center gap-2 text-xs" style={{ color: "var(--arc-text-tertiary)" }}>
-                                {statusDesc} <span className="text-gray-600">·</span> <ModelIndicator modelName={activeModel} />
+                                {statusDesc} <span className="text-gray-600">Â·</span> <ModelIndicator modelName={activeModel} />
                             </div>
                         </div>
                     </div>
@@ -730,12 +731,12 @@ export default function ArcAgentPage() {
                 {/* Messages area */}
                 <div className="flex-1 overflow-y-auto arc-scroll px-6 py-4" style={{ background: "var(--arc-bg-base)" }}>
                     {messages.length === 0 ? (
-                        /* ── Empty State ─────────────────────────────── */
+                        /* â”€â”€ Empty State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
                         <div className="flex flex-col items-center justify-center h-full" style={{ paddingBottom: 40 }}>
                             <ArcAvatar state="idle" size={80} />
                             <h2 className="mt-6 text-2xl font-semibold" style={{ color: "var(--arc-text-primary)" }}>Talk to Arc</h2>
                             <p className="mt-3 text-center max-w-md text-sm leading-relaxed" style={{ color: "var(--arc-text-secondary)" }}>
-                                I am Arc Agent — the intelligence controller of Nexearch. I manage clients, pipelines, evolution, and publishing across all 7 platforms. What would you like to do?
+                                I am Arc Agent â€” the intelligence controller of Nexearch. I manage clients, pipelines, evolution, and publishing across all 7 platforms. What would you like to do?
                             </p>
                             <div className="flex flex-wrap justify-center gap-2 mt-8">
                                 {QUICK_ACTIONS.map(qa => (
@@ -746,7 +747,7 @@ export default function ArcAgentPage() {
                             </div>
                         </div>
                     ) : (
-                        /* ── Message List ────────────────────────────── */
+                        /* â”€â”€ Message List â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
                         <>
                             {messages.map((msg) => (
                                 <div key={msg.id} className={`flex gap-3 mb-5 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
@@ -786,11 +787,7 @@ export default function ArcAgentPage() {
                                             ) : (
                                                 <div className="arc-markdown-container">
                                                     {msg.thinking && msg.thinking.trim() && (
-                                                        <ThinkingBlock 
-                                                            thinking={msg.thinking} 
-                                                            accentColor="#8B5CF6" 
-                                                            isStreaming={msg.status === "streaming"} 
-                                                        />
+                                                        <ThinkingBlock thinking={msg.thinking} accentColor="#8B5CF6" streaming={msg.status === "streaming"} />
                                                     )}
                                                     <MarkdownRenderer
                                                         content={msg.content || (msg.role === "assistant" ? "Response completed." : "")}
@@ -846,7 +843,7 @@ export default function ArcAgentPage() {
                     {/* Footer hint */}
                     <div className="flex justify-between mt-2 px-1">
                         <span className="text-[11px]" style={{ color: "var(--arc-text-tertiary)" }}>
-                            Shift+Enter for new line · / for commands
+                            Shift+Enter for new line Â· / for commands
                         </span>
                         <span className="text-[11px]" style={{ color: "var(--arc-text-tertiary)", fontFamily: "JetBrains Mono, monospace" }}>
                             {activeModel}
