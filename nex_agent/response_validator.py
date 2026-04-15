@@ -229,152 +229,172 @@ class ResponseValidator:
 
     # ─────────────────────────────────────────────────────────────
 
+    def _is_thinking_line(self, line: str) -> bool:
+        """Case-insensitive: is this line reasoning/leaked-prompt content?"""
+        s = line.strip()
+        if not s:
+            return False
+        sl = s.lower()
+        for p in self._LEAKED_PROMPT_LINE_PREFIXES:
+            if sl.startswith(p.lower()):
+                return True
+        for kw in self.REASONING_KEYWORDS:
+            if s.startswith(kw):
+                return True
+        _BROAD = (
+            "the user is", "the user has", "the user said", "the user want",
+            "the user asked", "the user seem",
+            "i should ", "i need to", "i am going", "i will ", "i must ",
+            "i want to", "i'll ", "i'd ", "i'm thinking",
+            "since ", "since the", "since ved", "since i ",
+            "let me ", "let's ", "let us ",
+            "my response", "my goal", "my plan", "my approach",
+            "for this ", "in this case", "in order to",
+            "to respond", "to answer", "to handle",
+            "based on", "given that", "given the",
+            "however,", "but wait", "but actually", "but the prompt",
+            "wait,", "wait -", "wait.",
+            "actually,", "actually -",
+            "hmm,", "hmm -", "hmm.",
+            "looking at", "thinking about", "reviewing",
+            "the prompt", "the system prompt", "the instructions",
+            "if the user", "if they ", "if this ", "if i ",
+            "self correction", "self-correction",
+            "appropriate response", "appropriate:",
+            "restrictions:", "restriction:",
+            "draft ", "option 1", "option 2", "option 3",
+            "better:", "best:", "too verbose", "too formal",
+            "response style", "response:", "response option",
+            "now, ", "now i ", "right, ",
+            "first, ", "first i ",
+            "however, the", "however, it", "however, this",
+        )
+        for pat in _BROAD:
+            if sl.startswith(pat):
+                return True
+        return False
+
     def extract_thinking_and_clean(self, raw_text: str) -> tuple:
         """
         Separate LLM output into (thinking_content, clean_answer).
 
-        Returns a 2-tuple:
-          - thinking_content: everything that looks like internal reasoning
-            / leaked prompt structure (may be empty string)
-          - clean_answer: the actual user-facing response
-
-        Uses a 3-pass strategy:
-          Pass 1 — Strip <think>...</think> XML blocks.
-          Pass 2 — Detect and pull out leaked prompt structure blocks
-                    (labeled fields like 'User says:', 'Persona:', etc.)
-                    AND their continuation lines (reasoning prose that
-                    follows directly after a matched label block).
-          Pass 3 — Strip standalone reasoning keyword lines
-                    (PLAN:, UNDERSTAND:, EXECUTE:, etc.)
-
-        Safety — if stripping leaves nothing, returns the raw text as the
-        clean answer so we never show a blank message.
+        Algorithm:
+          1. Strip <think>...</think> XML blocks.
+          2. Detect whether ANY leaked-prompt prefix exists (case-insensitive).
+             If none found: response is clean, return as-is.
+          3. Scan BACKWARDS from the last line to collect the last consecutive
+             block of lines that are NOT thinking/leaked-prompt. That block is
+             the clean answer. Everything before it is thinking_content.
+          4. Quote-extraction fallback: if even the last line looks like
+             thinking, the real answer often appears AFTER the last closing
+             quote (e.g. '"example" (desc).ACTUAL ANSWER').
         """
         if not raw_text or not raw_text.strip():
             return "", raw_text
 
         thinking_parts: list = []
 
-        # ─── Pass 1: Extract explicit <think>...</think> XML blocks ──
+        # ── 1. Strip <think> blocks ──────────────────────────────────
         think_matches = re.findall(
             r"<think>(.*?)</think>", raw_text, re.DOTALL | re.IGNORECASE
         )
-        for match in think_matches:
-            thinking_parts.append(match.strip())
-        remaining = re.sub(
+        for m in think_matches:
+            thinking_parts.append(m.strip())
+        text = re.sub(
             r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
         ).strip()
 
-        # ─── Pass 2: Leaked prompt-structure + continuation lines ────
-        #
-        # State machine:
-        #   CLEAN   – normal content
-        #   LEAKED  – inside a labeled block (User says:, Persona:, ...)
-        #   REASON  – continuation prose after a labeled block
-        #             ("The user is greeting me.", "I should acknowledge..")
-        #
-        # Continuation prose starters (follow a leaked block):
-        _CONTINUATION_STARTERS: Tuple[str, ...] = (
-            "The user is", "The user has", "The user said",
-            "I should", "I need to", "I am going to", "I will",
-            "I must", "I want to",
-            "Since ", "Since the", "Since Ved",
-            "Let me", "Let's",
-            "My response", "My goal", "My plan",
-            "For this", "In this case", "In order to",
-            "To respond", "To answer",
-            "Based on", "Given that", "Given the",
+        # ── 2. Check for leaked structure ────────────────────────────
+        text_lower = text.lower()
+        has_leaked = any(
+            text_lower.lstrip().startswith(p.lower())
+            or ("\n" + p.lower()) in text_lower
+            for p in self._LEAKED_PROMPT_LINE_PREFIXES
         )
 
-        STATE_CLEAN  = "clean"
-        STATE_LEAKED = "leaked"
-        STATE_REASON = "reason"
+        if not has_leaked:
+            # Clean response — strip role prefix and return
+            text = re.sub(r"^\s*(Nex|Arc):\s*", "", text, flags=re.IGNORECASE)
+            thinking_str = "\n\n".join(t for t in thinking_parts if t)
+            return thinking_str, text
 
-        lines = remaining.split("\n")
-        leaked_block: list = []
-        clean_lines: list  = []
-        state = STATE_CLEAN
+        # ── 3. Backwards scan ────────────────────────────────────────
+        lines = text.split("\n")
+        clean_rev: list = []
+        collecting = False
 
-        for line in lines:
-            stripped = line.strip()
-
-            if state == STATE_CLEAN:
-                # Does this line start a leaked block?
-                if any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
-                    state = STATE_LEAKED
-                    leaked_block.append(line)
-                else:
-                    clean_lines.append(line)
-
-            elif state == STATE_LEAKED:
-                if not stripped:
-                    leaked_block.append(line)  # blank inside block
-                elif any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
-                    leaked_block.append(line)  # another labeled line
-                elif re.match(r'^["\u201c\u2018]', stripped):
-                    # Quoted example line — still part of leaked block
-                    leaked_block.append(line)
-                elif any(stripped.startswith(c) for c in _CONTINUATION_STARTERS):
-                    state = STATE_REASON
-                    leaked_block.append(line)  # continuation is also thinking
-                elif re.match(r'^Draft \d', stripped, re.IGNORECASE):
-                    leaked_block.append(line)
-                else:
-                    # First non-matching, non-blank line → clean answer
-                    state = STATE_CLEAN
-                    clean_lines.append(line)
-
-            elif state == STATE_REASON:
-                if not stripped:
-                    leaked_block.append(line)
-                elif any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
-                    state = STATE_LEAKED
-                    leaked_block.append(line)
-                elif any(stripped.startswith(c) for c in _CONTINUATION_STARTERS):
-                    leaked_block.append(line)
-                elif re.match(r'^["\u201c\u2018]', stripped):
-                    leaked_block.append(line)
-                else:
-                    # End of reasoning prose — treat rest as clean
-                    state = STATE_CLEAN
-                    clean_lines.append(line)
-
-        if leaked_block:
-            thinking_parts.append("\n".join(leaked_block).strip())
-
-        remaining = "\n".join(clean_lines).strip()
-
-        # ─── Pass 3: Reasoning keyword echo lines ────────────────────
-        kw_lines: list   = []
-        final_lines: list = []
-        in_kw_block = False
-        for line in remaining.split("\n"):
-            stripped = line.strip()
-            if any(stripped.startswith(kw) for kw in self.REASONING_KEYWORDS):
-                in_kw_block = True
-                kw_lines.append(line)
-            elif in_kw_block and stripped:
-                in_kw_block = False
-                final_lines.append(line)
-            elif in_kw_block:
-                kw_lines.append(line)
+        for line in reversed(lines):
+            s = line.strip()
+            if not collecting:
+                if not s:
+                    continue          # skip trailing blanks
+                if self._is_thinking_line(line):
+                    break             # last line is thinking — go to fallback
+                clean_rev.append(line)
+                collecting = True
             else:
-                final_lines.append(line)
-        if kw_lines:
-            thinking_parts.append("\n".join(kw_lines).strip())
-        clean = "\n".join(final_lines).strip()
+                if not s or self._is_thinking_line(line):
+                    break             # blank or thinking line ends clean block
+                clean_rev.append(line)
 
-        # ─── Strip leading Nex:/Arc: role prefix ─────────────────────
+        clean_lines = list(reversed(clean_rev))
+        clean = "\n".join(clean_lines).strip()
+
+        # ── 3b. Concatenated-example cleanup ─────────────────────────
+        # Models often write: '"example" (Short, warm).ACTUAL ANSWER'
+        # or: '"example"ACTUAL ANSWER' — we want only ACTUAL ANSWER.
+        # Detect: single-line clean that starts with a quote AND contains
+        # something meaningful after the last closing quote/paren+period.
+        if clean and "\n" not in clean:
+            s = clean.strip()
+            # Pattern A: ends with ).TEXT  e.g. "(Short, direct, warm).Hey! ..."
+            m = re.search(r'\)\s*\.([A-Z][^\n]{2,})$', s)
+            if m:
+                clean = m.group(1).strip()
+            else:
+                # Pattern B: text after last closing quote  e.g. '"Yo!"Hey there!'
+                after = re.sub(r".*['\"\u201d\u2019]", "", s).strip()
+                after = re.sub(r"^[.,;\s]+", "", after).strip()
+                if len(after) > 3 and not after.startswith("("):
+                    clean = after
+
+        # ── 4. Quote-extraction fallback ─────────────────────────────
+        # Pattern: '"example text" (description).ACTUAL ANSWER'
+        #      or: "Let's go with: 'example'ACTUAL ANSWER"
+        if not clean:
+            last = next((l.strip() for l in reversed(lines) if l.strip()), "")
+            if last:
+                # Text after the last closing quote
+                after = re.sub(r".*['\"\u201d\u2019]", "", last).strip()
+                after = re.sub(r"^[.,;:\s]+", "", after).strip()
+                if len(after) > 3:
+                    clean = after
+                else:
+                    # Use the last quoted string itself
+                    quotes = re.findall(
+                        r"['\"\u201c\u2018]([^'\"\u201c\u2018\u201d\u2019]{4,})['\"\u201d\u2019]",
+                        last
+                    )
+                    if quotes:
+                        clean = quotes[-1].strip()
+
+        # ── 5. Strip leading role prefix ─────────────────────────────
         clean = re.sub(r"^\s*(Nex|Arc):\s*", "", clean, flags=re.IGNORECASE)
 
-        # ─── Safety: never return an empty clean answer ───────────────
+        # ── 6. Build thinking string ──────────────────────────────────
+        if clean:
+            thinking_body = text.replace(clean, "", 1).strip()
+            if thinking_body:
+                thinking_parts.insert(0, thinking_body)
+
+        thinking_str = "\n\n".join(t for t in thinking_parts if t)
+
+        # ── Safety: never return blank ────────────────────────────────
         if not clean:
             return "", raw_text
 
-        thinking_str = "\n\n".join(t for t in thinking_parts if t)
         return thinking_str, clean
 
-    # ─────────────────────────────────────────────────────────────
 
     def validate_and_fix(
         self,
