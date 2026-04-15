@@ -1,0 +1,66 @@
+# ============================================================
+# NexClip — .gitignore
+# ============================================================
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.egg-info/
+*.egg
+.Python
+
+# Virtual environments
+backend/venv/
+venv/
+env/
+.venv/
+
+# Environment secrets — NEVER COMMIT THESE
+backend/.env
+.env
+frontend/.env.local
+
+# Databases & AI vector stores
+nexclip.db
+nexearch_chroma_db/
+backend/nexearch_chroma_db/
+**/*.sqlite3
+**/*.db-shm
+**/*.db-wal
+
+# Generated memory / runtime data
+nex_agent_memory/
+arc_agent_memory/
+nex_agent/nex_agent_memory/
+nexearch/arc/arc_agent_memory/
+nexearch_arc_memory/
+nexearch_arc_tools/
+
+# Storage — uploaded videos & generated clips
+backend/storage/
+nexearch_data/
+
+# Next.js build outputs
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+
+# Logs
+setup_log.txt
+**/*.log
+
+# OS generated
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Fix scripts (server-specific, not for repo)
+fix_server.sh

@@ -1,0 +1,3 @@
+"""
+NexClip — Config Module
+"""
