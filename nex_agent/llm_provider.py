@@ -360,7 +360,10 @@ class LLMProvider:
     # These return thought content in separate parts with `"thought": True`.
     _THINKING_CAPABLE_GEMINI_MODELS = {
         "gemma-4-31b-it",
-        "gemini-3.1-flash-lite-preview",
+        "gemma-4-9b-it",
+        "gemini-2.5-pro-preview-05-06",
+        "gemini-2.5-flash-preview-04-17",
+        "gemini-2.5-pro-exp-03-25",
     }
 
     def _supports_thinking(self, model_name: str) -> bool:
