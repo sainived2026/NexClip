@@ -118,6 +118,7 @@ export default function ArcAgentPage() {
     const shouldReconnectRef = useRef<boolean>(false);
     const messagesRef = useRef<Message[]>([]);
     const convIdRef = useRef<string | null>(null);
+    const pendingMsgIdRef = useRef<string | null>(null);  // local placeholder ID before stream_start
 
     useEffect(() => {
         messagesRef.current = messages;
@@ -286,9 +287,20 @@ export default function ArcAgentPage() {
         const messageId = data.message_id;
 
         if (type === "stream_start") {
-            setMessages(prev => [...prev, {
-                id: data.assistant_message_id, role: "assistant", content: "", timestamp: now(), status: "streaming",
-            }]);
+            // Promote the local placeholder to the server's ID
+            const serverId = data.assistant_message_id;
+            const localId = pendingMsgIdRef.current;
+            if (localId && serverId && localId !== serverId) {
+                setMessages(prev => prev.map(m =>
+                    m.id === localId ? { ...m, id: serverId } : m
+                ));
+            } else if (!localId) {
+                // No local placeholder — create one (fallback)
+                setMessages(prev => [...prev, {
+                    id: serverId, role: "assistant", content: "", timestamp: now(), status: "streaming",
+                }]);
+            }
+            pendingMsgIdRef.current = null;
             setAvatarState("responding");
             scrollToBottom();
         } else if (type === "token") {
@@ -329,9 +341,24 @@ export default function ArcAgentPage() {
         setMessages(prev => [...prev, { id: genId(), role: "user", content: msg, timestamp: now(), status: "complete" }]);
         setInput(""); setIsStreaming(true); setAvatarState("thinking"); scrollToBottom();
 
+        // Add a local thinking placeholder immediately so the bubble shows right away
+        const localPlaceholderId = genId();
+        pendingMsgIdRef.current = localPlaceholderId;
+        setMessages(prev => [...prev, {
+            id: localPlaceholderId,
+            role: "assistant",
+            content: "",
+            timestamp: now(),
+            status: "streaming",
+        }]);
+        scrollToBottom();
+
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({ message: msg, conversation_id: activeConvId }));
         } else {
+            // For SSE fallback, remove the placeholder first
+            setMessages(prev => prev.filter(m => m.id !== localPlaceholderId));
+            pendingMsgIdRef.current = null;
             await sendViaSse(msg);
         }
     };

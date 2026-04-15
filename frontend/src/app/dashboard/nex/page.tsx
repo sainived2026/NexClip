@@ -118,6 +118,7 @@ export default function NexAgentPage() {
     const shouldReconnectRef = useRef<boolean>(false);
     const messagesRef = useRef<Message[]>([]);
     const convIdRef = useRef<string | null>(null);
+    const pendingMsgIdRef = useRef<string | null>(null);  // local placeholder before stream_start
 
     useEffect(() => {
         messagesRef.current = messages;
@@ -320,15 +321,20 @@ export default function NexAgentPage() {
         const messageId = data.message_id;
 
         if (type === "stream_start") {
-            // Create placeholder assistant message
-            const assistantMsg: Message = {
-                id: data.assistant_message_id,
-                role: "assistant",
-                content: "",
-                timestamp: now(),
-                status: "streaming",
-            };
-            setMessages(prev => [...prev, assistantMsg]);
+            // Promote the local placeholder to the server's assigned ID
+            const serverId = data.assistant_message_id;
+            const localId = pendingMsgIdRef.current;
+            if (localId && serverId && localId !== serverId) {
+                setMessages(prev => prev.map(m =>
+                    m.id === localId ? { ...m, id: serverId } : m
+                ));
+            } else if (!localId) {
+                // No local placeholder — add fallback
+                setMessages(prev => [...prev, {
+                    id: serverId, role: "assistant" as const, content: "", timestamp: now(), status: "streaming" as const,
+                }]);
+            }
+            pendingMsgIdRef.current = null;
             setAvatarState("responding");
             scrollToBottom();
         }
@@ -456,6 +462,18 @@ export default function NexAgentPage() {
         setAvatarState("thinking");
         scrollToBottom();
 
+        // Inject thinking placeholder immediately
+        const localPlaceholderId = genId();
+        pendingMsgIdRef.current = localPlaceholderId;
+        setMessages(prev => [...prev, {
+            id: localPlaceholderId,
+            role: "assistant" as const,
+            content: "",
+            timestamp: now(),
+            status: "streaming" as const,
+        }]);
+        scrollToBottom();
+
         // Send via WebSocket if connected
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             wsRef.current.send(JSON.stringify({
@@ -463,7 +481,9 @@ export default function NexAgentPage() {
                 conversation_id: activeConvId,
             }));
         } else {
-            // Fallback to SSE
+            // SSE fallback — remove placeholder, SSE creates its own
+            setMessages(prev => prev.filter(m => m.id !== localPlaceholderId));
+            pendingMsgIdRef.current = null;
             await sendViaSse(msg);
         }
     };

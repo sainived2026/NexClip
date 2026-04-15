@@ -14,6 +14,41 @@ from typing import Any, Dict, Generator, List, Optional
 logger = logging.getLogger("arc_agent.conversation_engine")
 
 
+def _strip_response(text: str) -> str:
+    """Strip leaked prompt structure and thinking tokens from Arc's LLM output."""
+    if not text:
+        return text
+    try:
+        import sys, os
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+        from nex_agent.response_validator import ResponseValidator
+        return ResponseValidator().strip_thinking_tokens(text)
+    except Exception:
+        # Fallback: manual strip of the most common leaked prefixes
+        import re
+        lines = text.split("\n")
+        LEAK_PREFIXES = ("User:", "User input:", "Context:", "Identity:", "Constraint:", "Role:", "RULES")
+        clean = []
+        in_block = False
+        for line in lines:
+            stripped = line.strip()
+            if any(stripped.startswith(p) for p in LEAK_PREFIXES):
+                in_block = True
+                continue
+            if in_block and re.match(r'^(\d+\.|-|\*)\s', stripped):
+                continue
+            if in_block:
+                if not stripped:
+                    continue
+                else:
+                    in_block = False
+            clean.append(line)
+        result = "\n".join(clean).strip()
+        # Strip leading "Arc:" prefix from few-shot style outputs
+        result = re.sub(r"^\s*Arc:\s*", "", result, flags=re.IGNORECASE)
+        return result or text
+
+
 class ArcConversationEngine:
     """
     LLM conversation engine with function calling for Arc Agent.
@@ -133,8 +168,10 @@ class ArcConversationEngine:
                 text_content = response.get("content", "")
 
                 if text_content and not tool_calls:
+                    # Strip leaked prompt structure before streaming
+                    cleaned = _strip_response(text_content)
                     # Pure text response — stream it
-                    for item in _stream_text_response(text_content):
+                    for item in _stream_text_response(cleaned):
                         yield item
                     full_response = nonlocal_full_response[0]
                     break
