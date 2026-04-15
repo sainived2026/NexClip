@@ -33,16 +33,75 @@ class ResponseValidator:
 
     # ── Leaked prompt-structure line prefixes ─────────────────────
     # These are labels that appear when a reasoning model echoes the
-    # few-shot prompt structure back verbatim (seen in screenshot).
+    # few-shot / system prompt structure back verbatim.
+    # Source: direct observation from UI screenshots.
     _LEAKED_PROMPT_LINE_PREFIXES: Tuple[str, ...] = (
-        "User input:",
+        # ── User message echoes ──────────────────────────
+        "User says:",
         "User said:",
+        "User input:",
+        "User identity:",
+        "User message:",
+        "User query:",
+        "User request:",
+        # ── Persona / identity labels ────────────────────
+        "Persona:",
+        "Persona guidelines:",
+        "Identity:",
         "Role:",
+        "Agent role:",
+        "My role:",
+        # ── Style / tone labels ──────────────────────────
+        "Style:",
+        "Tone:",
+        "Voice:",
+        "Format:",
+        # ── Context / situation labels ───────────────────
+        "Context:",
+        "Current situation:",
+        "Situation:",
+        "Background:",
+        # ── Instruction / rule labels ────────────────────
+        "Instruction:",
+        "Instructions:",
+        "Constraint:",
         "Constraints:",
+        "Greeting rule:",
+        "Greeting:",
+        "Rule:",
         "RULES —",
         "RULES:",
+        "QUALITY OVER QUANTITY",
+        "Call to action:",
+        "Acknowledge",
+        # ── Draft / example labels ───────────────────────
+        "Draft 1",
+        "Draft 2",
+        "Draft 3",
+        "Draft 4",
+        "Draft 5",
         "Example good responses:",
         "Example responses:",
+        "Example:",
+        "Response option",
+        "Option 1",
+        "Option 2",
+        "Option 3",
+        # ── Reasoning / action labels ────────────────────
+        "Action:",
+        "Action plan:",
+        "Plan:",
+        "Decision:",
+        "Output:",
+        "Execution:",
+        "Coordinate:",
+        "Identify the ",
+        "Determine the ",
+        "Client Lookup:",
+        "Method Selection:",
+        "Asset Handoff:",
+        "Arc Execution:",
+        # ── Old patterns ─────────────────────────────────
         "Natural hello,",
         "No reasoning",
         "No keywords",
@@ -51,6 +110,14 @@ class ResponseValidator:
         "No prefixes",
         "One short sentence",
         "Just say hello",
+        # ── Arc-specific labels seen in screenshots ──────
+        "I should acknowledge",
+        "I need to maintain",
+        "Since Ved is",
+        "Since the user is",
+        "The user is addressing",
+        "The user is greeting",
+        "The user is not",
     )
 
     # ── Raw-prose thinking sentence starters ──────────────────────
@@ -171,58 +238,114 @@ class ResponseValidator:
             / leaked prompt structure (may be empty string)
           - clean_answer: the actual user-facing response
 
-        This allows callers to SHOW the thinking in a collapsible block
-        rather than silently dropping it.
+        Uses a 3-pass strategy:
+          Pass 1 — Strip <think>...</think> XML blocks.
+          Pass 2 — Detect and pull out leaked prompt structure blocks
+                    (labeled fields like 'User says:', 'Persona:', etc.)
+                    AND their continuation lines (reasoning prose that
+                    follows directly after a matched label block).
+          Pass 3 — Strip standalone reasoning keyword lines
+                    (PLAN:, UNDERSTAND:, EXECUTE:, etc.)
+
+        Safety — if stripping leaves nothing, returns the raw text as the
+        clean answer so we never show a blank message.
         """
         if not raw_text or not raw_text.strip():
             return "", raw_text
 
         thinking_parts: list = []
 
-        # ── 1. Extract explicit <think>...</think> XML blocks ─────
+        # ─── Pass 1: Extract explicit <think>...</think> XML blocks ──
         think_matches = re.findall(
             r"<think>(.*?)</think>", raw_text, re.DOTALL | re.IGNORECASE
         )
         for match in think_matches:
             thinking_parts.append(match.strip())
-
-        # Remove the <think> tags from text before further processing
         remaining = re.sub(
             r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
         ).strip()
 
-        # ── 2. Extract leaked prompt-structure blocks ─────────────
-        # (lines starting with User:, Context:, Identity:, Constraint:, etc.)
+        # ─── Pass 2: Leaked prompt-structure + continuation lines ────
+        #
+        # State machine:
+        #   CLEAN   – normal content
+        #   LEAKED  – inside a labeled block (User says:, Persona:, ...)
+        #   REASON  – continuation prose after a labeled block
+        #             ("The user is greeting me.", "I should acknowledge..")
+        #
+        # Continuation prose starters (follow a leaked block):
+        _CONTINUATION_STARTERS: Tuple[str, ...] = (
+            "The user is", "The user has", "The user said",
+            "I should", "I need to", "I am going to", "I will",
+            "I must", "I want to",
+            "Since ", "Since the", "Since Ved",
+            "Let me", "Let's",
+            "My response", "My goal", "My plan",
+            "For this", "In this case", "In order to",
+            "To respond", "To answer",
+            "Based on", "Given that", "Given the",
+        )
+
+        STATE_CLEAN  = "clean"
+        STATE_LEAKED = "leaked"
+        STATE_REASON = "reason"
+
         lines = remaining.split("\n")
         leaked_block: list = []
-        clean_lines: list = []
-        in_leaked = False
+        clean_lines: list  = []
+        state = STATE_CLEAN
 
         for line in lines:
             stripped = line.strip()
-            # Starts with a known leaked-prompt prefix?
-            if any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
-                in_leaked = True
-                leaked_block.append(line)
-            elif in_leaked and re.match(r"^(\d+\.|-|\*)\s", stripped):
-                leaked_block.append(line)
-            elif in_leaked:
-                if not stripped:
-                    leaked_block.append(line)  # blank line inside block
+
+            if state == STATE_CLEAN:
+                # Does this line start a leaked block?
+                if any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
+                    state = STATE_LEAKED
+                    leaked_block.append(line)
                 else:
-                    in_leaked = False
-                    clean_lines.append(line)   # first real content after block
-            else:
-                clean_lines.append(line)
+                    clean_lines.append(line)
+
+            elif state == STATE_LEAKED:
+                if not stripped:
+                    leaked_block.append(line)  # blank inside block
+                elif any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
+                    leaked_block.append(line)  # another labeled line
+                elif re.match(r'^["\u201c\u2018]', stripped):
+                    # Quoted example line — still part of leaked block
+                    leaked_block.append(line)
+                elif any(stripped.startswith(c) for c in _CONTINUATION_STARTERS):
+                    state = STATE_REASON
+                    leaked_block.append(line)  # continuation is also thinking
+                elif re.match(r'^Draft \d', stripped, re.IGNORECASE):
+                    leaked_block.append(line)
+                else:
+                    # First non-matching, non-blank line → clean answer
+                    state = STATE_CLEAN
+                    clean_lines.append(line)
+
+            elif state == STATE_REASON:
+                if not stripped:
+                    leaked_block.append(line)
+                elif any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
+                    state = STATE_LEAKED
+                    leaked_block.append(line)
+                elif any(stripped.startswith(c) for c in _CONTINUATION_STARTERS):
+                    leaked_block.append(line)
+                elif re.match(r'^["\u201c\u2018]', stripped):
+                    leaked_block.append(line)
+                else:
+                    # End of reasoning prose — treat rest as clean
+                    state = STATE_CLEAN
+                    clean_lines.append(line)
 
         if leaked_block:
             thinking_parts.append("\n".join(leaked_block).strip())
 
         remaining = "\n".join(clean_lines).strip()
 
-        # ── 3. Extract reasoning keyword echo lines ───────────────
-        # (PLAN:, UNDERSTAND:, EXECUTE:, etc.)
-        kw_lines: list = []
+        # ─── Pass 3: Reasoning keyword echo lines ────────────────────
+        kw_lines: list   = []
         final_lines: list = []
         in_kw_block = False
         for line in remaining.split("\n"):
@@ -230,25 +353,21 @@ class ResponseValidator:
             if any(stripped.startswith(kw) for kw in self.REASONING_KEYWORDS):
                 in_kw_block = True
                 kw_lines.append(line)
-            elif in_kw_block and stripped and not any(
-                stripped.startswith(kw) for kw in self.REASONING_KEYWORDS
-            ):
+            elif in_kw_block and stripped:
                 in_kw_block = False
                 final_lines.append(line)
             elif in_kw_block:
                 kw_lines.append(line)
             else:
                 final_lines.append(line)
-
         if kw_lines:
             thinking_parts.append("\n".join(kw_lines).strip())
-
         clean = "\n".join(final_lines).strip()
 
-        # ── 4. Strip leading Nex:/Arc: prefix ─────────────────────
+        # ─── Strip leading Nex:/Arc: role prefix ─────────────────────
         clean = re.sub(r"^\s*(Nex|Arc):\s*", "", clean, flags=re.IGNORECASE)
 
-        # ── Safety: if everything got stripped, return original ───
+        # ─── Safety: never return an empty clean answer ───────────────
         if not clean:
             return "", raw_text
 
