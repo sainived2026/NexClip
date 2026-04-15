@@ -102,7 +102,8 @@ export const nexearchAPI = {
 export default api;
 
 // ── Nex Agent API (port 8001) ─────────────────────────────────
-const NEX_API = "http://localhost:8001/api/nex";
+const NEX_AGENT_BASE = process.env.NEXT_PUBLIC_NEX_AGENT_URL || "http://localhost:8001";
+const NEX_API = `${NEX_AGENT_BASE}/api/nex`;
 
 function _getToken(): string {
     if (typeof window !== "undefined") {
@@ -139,7 +140,8 @@ export const nexAgentAPI = {
 };
 
 // ── Arc Agent API (port 8003) ─────────────────────────────────
-const ARC_API = "http://localhost:8003/api";
+const ARC_AGENT_BASE = process.env.NEXT_PUBLIC_ARC_AGENT_URL || "http://localhost:8003";
+const ARC_API = `${ARC_AGENT_BASE}/api`;
 
 export const arcAgentAPI = {
     listConversations: () =>

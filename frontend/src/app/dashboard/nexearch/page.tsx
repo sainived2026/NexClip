@@ -19,11 +19,13 @@ export default function NexearchDashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const NEXEARCH = process.env.NEXT_PUBLIC_NEXEARCH_API_URL || "http://localhost:8002";
+    const ARC = process.env.NEXT_PUBLIC_ARC_AGENT_URL || "http://localhost:8003";
     const fetchStatus = async () => {
       try {
         const [nxRes, arcRes] = await Promise.allSettled([
-          fetch("http://localhost:8002/health").then(r => r.json()),
-          fetch("http://localhost:8003/api/status").then(r => r.json()),
+          fetch(`${NEXEARCH}/health`).then(r => r.json()),
+          fetch(`${ARC}/api/status`).then(r => r.json()),
         ]);
         setNexearchStatus(nxRes.status === "fulfilled" ? nxRes.value : { status: "offline" });
         setArcStatus(arcRes.status === "fulfilled" ? arcRes.value : { status: "offline" });
