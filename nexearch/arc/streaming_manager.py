@@ -55,17 +55,23 @@ class ArcStreamingManager:
 
     def finalize_stream(self, message_id: str,
                          tool_calls: Optional[List] = None,
-                         error: Optional[str] = None) -> None:
+                         error: Optional[str] = None,
+                         final_content: Optional[str] = None,
+                         thinking_content: str = "") -> None:
         """Finalize a stream and persist to disk."""
         stream = self._active_streams.get(message_id)
         if not stream:
             return
 
         stream["status"] = "error" if error else "complete"
+        if final_content is not None:
+            stream["content"] = final_content
         if error:
             stream["error"] = error
         if tool_calls:
             stream["tool_calls"] = tool_calls
+        if thinking_content:
+            stream["thinking_content"] = thinking_content
         stream["completed_at"] = datetime.now(timezone.utc).isoformat()
 
         # Persist

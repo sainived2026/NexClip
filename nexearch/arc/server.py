@@ -234,19 +234,21 @@ async def ws_chat(
                             sm.append_tokens(assistant_msg_id, chunk)
                         await arc_ws_manager.broadcast_token(user_id, assistant_msg_id, chunk)
 
-                # Extract thinking vs clean answer before sending done
-                thinking_content, clean_content = _validator.extract_thinking_and_clean(full_content)
+                # Build a safe final answer so leaked prompt text never reaches the UI
+                thinking_content, clean_content = _validator.sanitize_chat_response(full_content)
 
                 # Finalize
                 if sm:
                     sm.finalize_stream(
                         assistant_msg_id,
                         tool_calls=tool_calls_list if tool_calls_list else None,
+                        final_content=clean_content,
+                        thinking_content=thinking_content,
                     )
 
                 await arc_ws_manager.send_stream_event(
                     user_id, assistant_msg_id, "done", {
-                        "full_content": clean_content or full_content,
+                        "full_content": clean_content,
                         "thinking_content": thinking_content,
                         "tool_calls": tool_calls_list,
                     }

@@ -395,6 +395,38 @@ class ResponseValidator:
 
         return thinking_str, clean
 
+    def sanitize_chat_response(
+        self,
+        raw_text: str,
+        fallback_message: str = "I hit an internal formatting issue. Please try again.",
+    ) -> tuple[str, str]:
+        """
+        Build a safe `(thinking_content, final_answer)` pair for chat UIs.
+
+        This is stricter than `extract_thinking_and_clean()`: if extraction
+        fails, we try progressively safer fallbacks instead of failing open
+        and sending leaked prompt text to the user.
+        """
+        thinking, clean = self.extract_thinking_and_clean(raw_text)
+        clean = re.sub(r"^\s*(Nex|Arc):\s*", "", (clean or "").strip(), flags=re.IGNORECASE)
+        thinking = (thinking or "").strip()
+
+        if clean and not self._looks_like_internal_reasoning(clean):
+            return thinking, clean
+
+        stripped = self.strip_thinking_tokens(raw_text or "").strip()
+        stripped = re.sub(r"^\s*(Nex|Arc):\s*", "", stripped, flags=re.IGNORECASE).strip()
+        if stripped and not self._looks_like_internal_reasoning(stripped):
+            if not thinking and raw_text and stripped != (raw_text or "").strip():
+                thinking = (raw_text or "").strip()
+            return thinking, stripped
+
+        if raw_text and self._looks_like_internal_reasoning(raw_text):
+            return (raw_text or "").strip(), fallback_message
+
+        final_text = (clean or stripped or raw_text or fallback_message).strip()
+        return thinking, final_text or fallback_message
+
 
     def validate_and_fix(
         self,
@@ -544,6 +576,27 @@ class ResponseValidator:
                 return quoted[-1].strip()
 
         return result
+
+    def _looks_like_internal_reasoning(self, text: str) -> bool:
+        """
+        Heuristic guardrail for prompt/chain-of-thought leakage.
+        """
+        if not text or not text.strip():
+            return False
+
+        lines = [line for line in text.splitlines() if line.strip()]
+        if not lines:
+            return False
+
+        text_lower = text.lower()
+        if any(
+            text_lower.lstrip().startswith(prefix.lower()) or ("\n" + prefix.lower()) in text_lower
+            for prefix in self._LEAKED_PROMPT_LINE_PREFIXES
+        ):
+            return True
+
+        flagged = sum(1 for line in lines if self._is_thinking_line(line))
+        return flagged >= max(1, min(2, len(lines)))
 
     def _strip_keyword_block_lines(self, text: str) -> str:
         """

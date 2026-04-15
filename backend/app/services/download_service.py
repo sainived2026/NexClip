@@ -17,6 +17,24 @@ from app.services.storage_service import get_storage
 settings = get_settings()
 
 
+def _resolve_cookie_file() -> Path | None:
+    """
+    Find a usable `cookies.txt` regardless of the current working directory.
+    """
+    backend_root = Path(__file__).resolve().parents[2]
+    repo_root = backend_root.parent
+    candidates = [
+        Path.cwd() / "cookies.txt",
+        backend_root / "cookies.txt",
+        repo_root / "cookies.txt",
+    ]
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate.resolve()
+    return None
+
+
 class DownloadService:
     """Downloads videos from YouTube and public URLs using yt-dlp."""
 
@@ -53,14 +71,14 @@ class DownloadService:
         ]
 
         import yt_dlp
-        
+
         browsers_to_try = [None]
-        cookies_txt_path = Path("cookies.txt")
-        
-        if cookies_txt_path.exists():
-            logger.info("Found cookies.txt file, will use it.")
+        cookies_txt_path = _resolve_cookie_file()
+
+        if cookies_txt_path:
+            logger.info(f"Found cookies.txt file, will use it: {cookies_txt_path}")
             browsers_to_try.insert(0, "cookies.txt")
-            
+
         if settings.YTDLP_COOKIES_BROWSER and settings.YTDLP_COOKIES_BROWSER.lower() != "none":
             browsers_to_try.insert(0, settings.YTDLP_COOKIES_BROWSER.lower())
 
@@ -80,8 +98,8 @@ class DownloadService:
                 'extractor_retries': 3,
             }
             
-            if browser == "cookies.txt":
-                ydl_opts['cookiefile'] = 'cookies.txt'
+            if browser == "cookies.txt" and cookies_txt_path:
+                ydl_opts['cookiefile'] = str(cookies_txt_path)
             elif browser is not None:
                 ydl_opts['cookiesfrombrowser'] = (browser,)
                 
@@ -130,7 +148,11 @@ class DownloadService:
         if not success:
             clean_err = f"Download failed: {error_msg}"
             if "confirm you're not a bot" in error_msg:
-                  clean_err = "YouTube bot detection: Failed to extract cookies. Fix: Export your YouTube cookies using a 'Get cookies.txt' extension."
+                  clean_err = (
+                      "YouTube bot detection blocked the server download. "
+                      "Provide a valid cookies export at backend/cookies.txt "
+                      "or configure a working browser profile for yt-dlp on the server."
+                  )
             raise RuntimeError(clean_err)
 
         # Verify file exists

@@ -34,6 +34,13 @@ interface Conversation {
     message_count: number;
 }
 
+function extractThinkingPayload(message: any): string {
+    if (typeof message?.thinking === "string") return message.thinking;
+    if (typeof message?.thinking_content === "string") return message.thinking_content;
+    if (typeof message?.message?.thinking_content === "string") return message.message.thinking_content;
+    return "";
+}
+
 const ARC_API = "http://localhost:8003/api";
 const ARC_WS = "ws://localhost:8003/ws/chat";
 
@@ -232,6 +239,7 @@ export default function ArcAgentPage() {
                 timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
                 status: m.status || "complete",
                 error_detail: m.error_detail,
+                thinking: extractThinkingPayload(m),
             }));
             setMessages(msgs);
             scrollToBottom();
@@ -405,11 +413,50 @@ export default function ArcAgentPage() {
             setIsStreaming(false); setAvatarState("idle");
         } else if (type === "replay") {
             setMessages(prev => {
+                const replayMessage = data.message;
+                if (replayMessage?.id) {
+                    const replayThinking = extractThinkingPayload(replayMessage);
+                    const exists = prev.find(m => m.id === replayMessage.id);
+                    if (exists) {
+                        return prev.map(m => m.id === replayMessage.id ? {
+                            ...m,
+                            content: replayMessage.content || m.content,
+                            status: replayMessage.status || m.status,
+                            error_detail: replayMessage.error || m.error_detail,
+                            thinking: replayThinking || m.thinking || "",
+                        } : m);
+                    }
+
+                    return [...prev, {
+                        id: replayMessage.id,
+                        role: (replayMessage.role || "assistant") as "user" | "assistant",
+                        content: replayMessage.content || "",
+                        timestamp: replayMessage.created_at ? new Date(replayMessage.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : now(),
+                        status: replayMessage.status || "complete",
+                        error_detail: replayMessage.error,
+                        thinking: replayThinking,
+                    }];
+                }
+
                 const exists = prev.find(m => m.id === messageId);
                 if (exists) {
-                    return prev.map(m => m.id === messageId ? { ...m, content: data.content || m.content, status: data.status || m.status, error_detail: data.error } : m);
+                    return prev.map(m => m.id === messageId ? {
+                        ...m,
+                        content: data.content || m.content,
+                        status: data.status || m.status,
+                        error_detail: data.error,
+                        thinking: data.thinking_content || m.thinking || "",
+                    } : m);
                 }
-                return [...prev, { id: messageId, role: "assistant" as const, content: data.content || "", timestamp: now(), status: data.status || "complete", error_detail: data.error }];
+                return [...prev, {
+                    id: messageId,
+                    role: "assistant" as const,
+                    content: data.content || "",
+                    timestamp: now(),
+                    status: data.status || "complete",
+                    error_detail: data.error,
+                    thinking: data.thinking_content || "",
+                }];
             });
             if (data.status === "streaming") { setIsStreaming(true); setAvatarState("responding"); }
             else { setIsStreaming(false); setAvatarState("idle"); }
@@ -459,7 +506,12 @@ export default function ArcAgentPage() {
             });
             const data = await res.json();
             setMessages(prev => prev.map(m =>
-                m.id === aId ? { ...m, content: data.response || JSON.stringify(data), status: "complete" } : m
+                m.id === aId ? {
+                    ...m,
+                    content: data.response || JSON.stringify(data),
+                    status: "complete",
+                    thinking: extractThinkingPayload(data),
+                } : m
             ));
         } catch (e: any) {
             setMessages(prev => prev.map(m =>

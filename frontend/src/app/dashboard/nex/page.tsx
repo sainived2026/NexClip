@@ -34,6 +34,27 @@ interface Conversation {
     message_count: number;
 }
 
+function extractThinkingPayload(message: any): string {
+    if (typeof message?.thinking === "string") return message.thinking;
+    if (typeof message?.thinking_content === "string") return message.thinking_content;
+
+    const richData = message?.rich_data;
+    if (!richData) return "";
+
+    if (typeof richData === "object" && typeof richData.thinking_content === "string") {
+        return richData.thinking_content;
+    }
+
+    if (typeof richData === "string") {
+        try {
+            const parsed = JSON.parse(richData);
+            if (typeof parsed?.thinking_content === "string") return parsed.thinking_content;
+        } catch { }
+    }
+
+    return "";
+}
+
 const NEX_API = "http://localhost:8001/api/nex";
 const NEX_WS = "ws://localhost:8001/ws/chat";
 
@@ -242,6 +263,7 @@ export default function NexAgentPage() {
                 timestamp: m.created_at ? new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
                 status: m.status || "complete",
                 error_detail: m.error_detail,
+                thinking: extractThinkingPayload(m),
             }));
             setMessages(msgs);
             scrollToBottom();
@@ -475,6 +497,7 @@ export default function NexAgentPage() {
                                 content: data.content || m.content,
                                 status: data.status || m.status,
                                 error_detail: data.error,
+                                thinking: data.thinking_content || m.thinking || "",
                             };
                         }
                         return m;
@@ -488,6 +511,7 @@ export default function NexAgentPage() {
                     timestamp: now(),
                     status: data.status || "complete",
                     error_detail: data.error,
+                    thinking: data.thinking_content || "",
                 }];
             });
             if (data.status === "streaming") {
@@ -616,6 +640,15 @@ export default function NexAgentPage() {
                                 m.id === assistantMsg.id ? { ...m, content: fullContent } : m
                             ));
                             scrollToBottom();
+                        } else if (data.type === "done") {
+                            setMessages(prev => prev.map(m =>
+                                m.id === assistantMsg.id ? {
+                                    ...m,
+                                    content: data.full_content || fullContent,
+                                    thinking: data.thinking_content || m.thinking || "",
+                                    status: "complete",
+                                } : m
+                            ));
                         } else if (data.type === "error") {
                             setMessages(prev => prev.map(m =>
                                 m.id === assistantMsg.id ? {
@@ -629,11 +662,6 @@ export default function NexAgentPage() {
                     } catch { }
                 }
             }
-
-            // Mark complete
-            setMessages(prev => prev.map(m =>
-                m.id === assistantMsg.id ? { ...m, status: "complete" } : m
-            ));
         } catch (err: any) {
             setMessages(prev => prev.map(m =>
                 m.id === assistantMsg.id ? {

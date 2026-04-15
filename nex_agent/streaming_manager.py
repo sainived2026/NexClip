@@ -48,6 +48,7 @@ class StreamState:
     message_id: str
     tool_calls: List[Dict] = field(default_factory=list)
     error_detail: str = ""
+    thinking_content: str = ""
 
 
 class StreamingManager:
@@ -157,6 +158,9 @@ class StreamingManager:
         message_id: str,
         tool_calls: Optional[List[Dict]] = None,
         error: Optional[str] = None,
+        final_content: Optional[str] = None,
+        rich_type: Optional[str] = None,
+        rich_data: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Mark a stream as complete or errored. Final DB write.
@@ -167,7 +171,7 @@ class StreamingManager:
             self._finalize_db_only(message_id, "", tool_calls, error)
             return
 
-        final_content = stream.buffer
+        final_content = stream.buffer if final_content is None else final_content
         status = "complete" if not error else "error"
         now = datetime.now(timezone.utc)
 
@@ -176,7 +180,8 @@ class StreamingManager:
             session.execute(text("""
                 UPDATE nex_messages
                 SET content = :content, status = :status, tool_calls = :tc,
-                    error_detail = :err, completed_at = :now, updated_at = :now,
+                    error_detail = :err, rich_type = :rich_type, rich_data = :rich_data,
+                    completed_at = :now, updated_at = :now,
                     token_count = :token_count
                 WHERE id = :id
             """), {
@@ -184,6 +189,8 @@ class StreamingManager:
                 "status": status,
                 "tc": json.dumps(tool_calls) if tool_calls else None,
                 "err": error,
+                "rich_type": rich_type,
+                "rich_data": json.dumps(rich_data) if rich_data else None,
                 "now": now,
                 "token_count": stream.token_count,
                 "id": message_id,
@@ -247,19 +254,21 @@ class StreamingManager:
         session = self._get_session()
         try:
             result = session.execute(text("""
-                SELECT content, status, tool_calls, error_detail
+                SELECT content, status, tool_calls, error_detail, rich_data
                 FROM nex_messages WHERE id = :id
             """), {"id": message_id}).fetchone()
 
             if not result:
                 return StreamState(status="not_found", content="", message_id=message_id)
 
+            rich_data = json.loads(result[4]) if result[4] else {}
             return StreamState(
                 status=result[1],
                 content=result[0] or "",
                 message_id=message_id,
                 tool_calls=json.loads(result[2]) if result[2] else [],
                 error_detail=result[3] or "",
+                thinking_content=rich_data.get("thinking_content", "") if isinstance(rich_data, dict) else "",
             )
         finally:
             session.close()

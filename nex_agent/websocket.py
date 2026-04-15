@@ -180,6 +180,7 @@ class NexConnectionManager:
                     "content": state.content,
                     "status": "complete",
                     "tool_calls": state.tool_calls,
+                    "thinking_content": state.thinking_content,
                 })
             elif state.status == "error":
                 await websocket.send_json({
@@ -188,6 +189,7 @@ class NexConnectionManager:
                     "content": state.content,
                     "status": "error",
                     "error": state.error_detail,
+                    "thinking_content": state.thinking_content,
                 })
             logger.info(f"Replayed {state.status} content for message {last_message_id[:8]}...")
         except Exception as e:

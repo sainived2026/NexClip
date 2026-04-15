@@ -206,9 +206,11 @@ async def chat_stream(
 
     async def event_generator():
         from nex_agent.request_context import reset_request_context, set_request_context
+        from nex_agent.response_validator import ResponseValidator
 
         full_content = ""
         tool_calls_list = []
+        validator = ResponseValidator()
         context_tokens = set_request_context(user_id, req.conversation_id)
         try:
             for chunk in agent.chat_stream(req.message):
@@ -235,11 +237,23 @@ async def chat_stream(
                 yield f"data: {chunk}\n\n"
 
             # Finalize
+            thinking_content, clean_content = validator.sanitize_chat_response(full_content)
             if sm:
                 sm.finalize_stream(
                     assistant_msg_id,
                     tool_calls=tool_calls_list if tool_calls_list else None,
+                    final_content=clean_content,
+                    rich_type="chat_reasoning" if thinking_content else None,
+                    rich_data={"thinking_content": thinking_content} if thinking_content else None,
                 )
+
+            done_event = json.dumps({
+                "type": "done",
+                "full_content": clean_content,
+                "thinking_content": thinking_content,
+                "tool_calls": tool_calls_list,
+            })
+            yield f"data: {done_event}\n\n"
 
         except Exception as e:
             error = json.dumps({"type": "error", "content": str(e)})

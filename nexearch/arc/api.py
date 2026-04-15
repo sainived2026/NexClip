@@ -31,6 +31,8 @@ class ChatResponse(BaseModel):
 
 def _collect_chat_stream_result(agent, message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Collect streamed Arc Agent output into a sync JSON response."""
+    from nex_agent.response_validator import ResponseValidator
+
     response_parts = []
     tool_calls = []
     errors = []
@@ -55,7 +57,8 @@ def _collect_chat_stream_result(agent, message: str, context: Optional[Dict[str,
         elif event_type == "error":
             errors.append(parsed.get("content", "Unknown error"))
 
-    response_text = "".join(response_parts).strip()
+    raw_response = "".join(response_parts).strip()
+    _, response_text = ResponseValidator().sanitize_chat_response(raw_response)
     if not response_text and errors:
         response_text = errors[-1]
 
@@ -685,4 +688,3 @@ async def update_client_dna(client_id: str, platform: str, payload: Dict[str, An
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
