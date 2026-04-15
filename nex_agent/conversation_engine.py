@@ -239,7 +239,7 @@ class ConversationEngine:
                 # LLM returned text — extract thinking and clean content
                 raw_text = response.text or ""
                 
-                # Extract <think>...</think> blocks as thinking content
+                # Extract explicit <think>...</think> blocks as thinking content
                 import re as _re
                 thinking_content = ""
                 think_match = _re.search(r"<think>(.*?)</think>", raw_text, _re.DOTALL | _re.IGNORECASE)
@@ -247,12 +247,16 @@ class ConversationEngine:
                     thinking_content = think_match.group(1).strip()
                     raw_text = _re.sub(r"<think>.*?</think>", "", raw_text, flags=_re.DOTALL | _re.IGNORECASE).strip()
                 
-                # Run the standard validator to strip any remaining leaked reasoning
+                # Run the standard validator to strip leaked prompt structure and hallucinations.
+                # NOTE: If the model echoed the system prompt, validate_and_fix will strip it.
+                # We do NOT put that stripped content into thinking_content (it's not real thinking).
                 is_valid, final_text = validator.validate_and_fix(raw_text, tool_results_summary)
                 
-                # If validator stripped content that looks like thinking, capture it
-                if not thinking_content and raw_text and final_text != raw_text:
-                    thinking_content = raw_text.replace(final_text, "").strip()
+                # If stripping left us with an empty string, try a graceful fallback
+                if not final_text or not final_text.strip():
+                    # The entire response was leaked prompt structure — emit a minimal graceful reply
+                    final_text = "Hey! How can I help you?"
+                    thinking_content = ""  # Don't show stripped system prompt as thinking
 
                 # Store in conversation history (clean text only)
                 self._messages.append({"role": "assistant", "content": final_text})
@@ -260,7 +264,7 @@ class ConversationEngine:
                 # Save to memory
                 self._save_to_memory(user_message, final_text, tool_results_summary)
 
-                # Emit thinking event first (if any)
+                # Emit thinking event first (only genuine <think> block content)
                 if thinking_content:
                     yield json.dumps({"type": "thinking", "content": thinking_content})
 

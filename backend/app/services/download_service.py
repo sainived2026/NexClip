@@ -72,15 +72,22 @@ class DownloadService:
 
         import yt_dlp
 
-        browsers_to_try = [None]
+        # Build the prioritized list of authentication strategies:
+        # 1. cookies.txt file (if present) — best for servers
+        # 2. No cookies — public content only (will fail for age-gated/bot-blocked content)
+        # NOTE: Browser cookie extraction (chrome/firefox) is intentionally skipped on servers
+        #       because browsers don't run on headless Linux — it always fails.
+        browsers_to_try = []
         cookies_txt_path = _resolve_cookie_file()
 
         if cookies_txt_path:
-            logger.info(f"Found cookies.txt file, will use it: {cookies_txt_path}")
-            browsers_to_try.insert(0, "cookies.txt")
+            logger.info(f"Using cookies.txt from: {cookies_txt_path}")
+            browsers_to_try.append("cookies.txt")
+        else:
+            logger.warning("No cookies.txt found at backend/cookies.txt — YouTube may block the request.")
 
-        if settings.YTDLP_COOKIES_BROWSER and settings.YTDLP_COOKIES_BROWSER.lower() != "none":
-            browsers_to_try.insert(0, settings.YTDLP_COOKIES_BROWSER.lower())
+        # Always fall back to no-cookies as last resort (works for non-protected content)
+        browsers_to_try.append(None)
 
         error_msg = ""
         success = False
@@ -147,12 +154,12 @@ class DownloadService:
                     
         if not success:
             clean_err = f"Download failed: {error_msg}"
-            if "confirm you're not a bot" in error_msg:
-                  clean_err = (
-                      "YouTube bot detection blocked the server download. "
-                      "Provide a valid cookies export at backend/cookies.txt "
-                      "or configure a working browser profile for yt-dlp on the server."
-                  )
+            if "confirm you're not a bot" in error_msg or "Sign in" in error_msg or "cookies" in error_msg.lower():
+                clean_err = (
+                    "YouTube blocked the download (bot detection). "
+                    "Fix: Export your YouTube cookies from Chrome using the 'Get cookies.txt LOCALLY' extension, "
+                    "save the file as 'backend/cookies.txt' on the server, then retry."
+                )
             raise RuntimeError(clean_err)
 
         # Verify file exists

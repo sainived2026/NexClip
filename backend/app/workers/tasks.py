@@ -212,10 +212,17 @@ def _normalize_pipeline_error_message(error: Exception | str) -> str:
     text = str(error or "").strip()
     lowered = text.lower()
 
-    if "confirm you're not a bot" in lowered or "[youtube]" in lowered and "cookies" in lowered:
+    if (
+        "confirm you're not a bot" in lowered
+        or ("youtube" in lowered and "bot" in lowered)
+        or ("youtube" in lowered and "cookies" in lowered)
+        or ("sign in" in lowered and "youtube" in lowered)
+        or "youtube blocked" in lowered
+    ):
         return (
-            "YouTube blocked the server download. Export fresh authenticated cookies "
-            "to backend/cookies.txt, restart the backend and Celery worker, then retry."
+            "YouTube blocked the server download. "
+            "Export fresh YouTube cookies from Chrome using the 'Get cookies.txt LOCALLY' extension, "
+            "save the file as backend/cookies.txt on the server, then retry."
         )
 
     return text[:1000]

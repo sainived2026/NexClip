@@ -168,19 +168,19 @@ class ArcConversationEngine:
                 text_content = response.get("content", "")
 
                 if text_content and not tool_calls:
-                    # Extract <think>...</think> blocks as thinking content
+                    # Extract explicit <think>...</think> blocks only
                     import re as _re
                     thinking_content = ""
                     think_match = _re.search(r"<think>(.*?)</think>", text_content, _re.DOTALL | _re.IGNORECASE)
                     if think_match:
                         thinking_content = think_match.group(1).strip()
                         text_content = _re.sub(r"<think>.*?</think>", "", text_content, flags=_re.DOTALL | _re.IGNORECASE).strip()
-                    # Strip leaked prompt structure
+                    # Strip leaked prompt structure (silently — NOT shown as thinking)
                     cleaned = _strip_response(text_content)
-                    # If validator stripped content and we have no explicit thinking, capture it
-                    if not thinking_content and text_content and cleaned != text_content:
-                        thinking_content = text_content.replace(cleaned, "").strip()
-                    # Emit thinking event before streaming response
+                    if not cleaned or not cleaned.strip():
+                        cleaned = "Hey! How can I help?"
+                        thinking_content = ""
+                    # Emit thinking event before streaming (only genuine <think> content)
                     if thinking_content:
                         yield json.dumps({"type": "thinking", "content": thinking_content})
                     # Pure text response — stream it

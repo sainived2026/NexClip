@@ -293,7 +293,13 @@ class Settings(BaseSettings):
         return self
 
     model_config = {
-        "env_file": [".env", "backend/.env", "../backend/.env"],
+        "env_file": [
+            ".env",
+            "backend/.env",
+            "../backend/.env",
+            "../../backend/.env",
+            str(Path(__file__).resolve().parents[3] / "backend" / ".env"),  # Absolute: always correct
+        ],
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
