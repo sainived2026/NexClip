@@ -70,6 +70,7 @@ class LLMResponse:
 
     def __init__(self):
         self.text: str = ""
+        self.thinking: str = ""        # Native thought content from Gemini thinkingConfig API
         self.tool_calls: List[Dict[str, Any]] = []
         self.finish_reason: str = ""
         self.provider: str = ""
@@ -355,13 +356,57 @@ class LLMProvider:
 
     # ── Gemini implementations ──────────────────────────────────
 
+    # Models that support native thinking via the Gemini API thinkingConfig parameter.
+    # These return thought content in separate parts with `"thought": True`.
+    _THINKING_CAPABLE_GEMINI_MODELS = {
+        "gemma-4-31b-it",
+        "gemini-3.1-flash-lite-preview",
+    }
+
+    def _supports_thinking(self, model_name: str) -> bool:
+        """Returns True if the model supports the Gemini API thinkingConfig."""
+        return any(
+            model_name.startswith(m) or m in model_name
+            for m in self._THINKING_CAPABLE_GEMINI_MODELS
+        )
+
+    def _build_gemini_generation_config(self, model_name: str, temperature: float, max_tokens: int) -> Dict[str, Any]:
+        """Build Gemini generationConfig, enabling thinkingConfig for supported models."""
+        cfg: Dict[str, Any] = {
+            "temperature": temperature,
+            "maxOutputTokens": max_tokens,
+        }
+        if self._supports_thinking(model_name):
+            # Enable dynamic thinking budget — the model decides how much to think.
+            # Budget of -1 means dynamic (model chooses), 0 disables thinking.
+            cfg["thinkingConfig"] = {"thinkingBudget": -1}
+            logger.info(f"Enabled thinkingConfig for model: {model_name}")
+        return cfg
+
+    def _parse_gemini_parts(self, parts: list) -> tuple[str, str]:
+        """
+        Parse Gemini response parts, separating thought content from text content.
+        Returns: (text, thinking)
+          - text: the actual response text (parts without thought=True)
+          - thinking: the thought content (parts with thought=True)
+        """
+        text_parts: list[str] = []
+        thought_parts: list[str] = []
+        for part in parts:
+            if part.get("thought") is True:
+                # This part is internal model reasoning (thinking)
+                thought_parts.append(part.get("text", ""))
+            elif "text" in part:
+                text_parts.append(part["text"])
+        return "".join(text_parts), "".join(thought_parts)
+
     def _call_gemini_text(self, provider, system_prompt, user_message, temperature, max_tokens, timeout) -> str:
         import urllib.request
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{provider['model']}:generateContent?key={provider['api_key']}"
         payload = json.dumps({
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": [{"text": user_message}]}],
-            "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+            "generationConfig": self._build_gemini_generation_config(provider["model"], temperature, max_tokens),
         }).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
@@ -370,12 +415,12 @@ class LLMProvider:
             candidates = data.get("candidates", [])
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
-                if parts:
-                    return parts[0].get("text", "")
+                text, _ = self._parse_gemini_parts(parts)
+                return text
         return ""
 
     def _call_gemini_with_tools(self, provider, messages, tools, temperature, max_tokens, timeout) -> LLMResponse:
-        """Call Gemini with function calling support."""
+        """Call Gemini with function calling support. Supports native thinking (thinkingConfig)."""
         import urllib.request
 
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{provider['model']}:generateContent?key={provider['api_key']}"
@@ -454,7 +499,7 @@ class LLMProvider:
 
         body: Dict[str, Any] = {
             "contents": gemini_contents,
-            "generationConfig": {"temperature": temperature, "maxOutputTokens": max_tokens},
+            "generationConfig": self._build_gemini_generation_config(provider["model"], temperature, max_tokens),
         }
         if system_text:
             body["system_instruction"] = {"parts": [{"text": system_text}]}
@@ -478,7 +523,10 @@ class LLMProvider:
         result.finish_reason = candidates[0].get("finishReason", "")
 
         for part in parts:
-            if "text" in part:
+            if part.get("thought") is True:
+                # Official Gemini thinking API — thought parts are marked with `thought: true`
+                result.thinking += part.get("text", "")
+            elif "text" in part:
                 result.text += part["text"]
             elif "functionCall" in part:
                 fc = part["functionCall"]

@@ -198,6 +198,7 @@ class NexearchLLMRouter:
 
         return {
             "content": getattr(response, "text", "") or "",
+            "thinking": getattr(response, "thinking", "") or "",
             "tool_calls": tool_calls,
             "finish_reason": getattr(response, "finish_reason", ""),
             "provider": getattr(response, "provider", ""),

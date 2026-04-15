@@ -168,19 +168,28 @@ class ArcConversationEngine:
                 text_content = response.get("content", "")
 
                 if text_content and not tool_calls:
-                    # Extract explicit <think>...</think> blocks only
                     import re as _re
                     thinking_content = ""
-                    think_match = _re.search(r"<think>(.*?)</think>", text_content, _re.DOTALL | _re.IGNORECASE)
-                    if think_match:
-                        thinking_content = think_match.group(1).strip()
-                        text_content = _re.sub(r"<think>.*?</think>", "", text_content, flags=_re.DOTALL | _re.IGNORECASE).strip()
+
+                    # Priority 1: Native Gemini thinkingConfig thought parts
+                    native_thinking = response.get("thinking", "")
+                    if native_thinking:
+                        thinking_content = native_thinking.strip()
+
+                    # Priority 2: Explicit <think>...</think> XML tags in text
+                    if not thinking_content:
+                        think_match = _re.search(r"<think>(.*?)</think>", text_content, _re.DOTALL | _re.IGNORECASE)
+                        if think_match:
+                            thinking_content = think_match.group(1).strip()
+                            text_content = _re.sub(r"<think>.*?</think>", "", text_content, flags=_re.DOTALL | _re.IGNORECASE).strip()
+
                     # Strip leaked prompt structure (silently — NOT shown as thinking)
                     cleaned = _strip_response(text_content)
                     if not cleaned or not cleaned.strip():
                         cleaned = "Hey! How can I help?"
                         thinking_content = ""
-                    # Emit thinking event before streaming (only genuine <think> content)
+
+                    # Emit thinking event before streaming (native API or <think> block)
                     if thinking_content:
                         yield json.dumps({"type": "thinking", "content": thinking_content})
                     # Pure text response — stream it

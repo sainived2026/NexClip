@@ -238,23 +238,28 @@ class ConversationEngine:
             else:
                 # LLM returned text — extract thinking and clean content
                 raw_text = response.text or ""
-                
-                # Extract explicit <think>...</think> blocks as thinking content
+
                 import re as _re
                 thinking_content = ""
-                think_match = _re.search(r"<think>(.*?)</think>", raw_text, _re.DOTALL | _re.IGNORECASE)
-                if think_match:
-                    thinking_content = think_match.group(1).strip()
-                    raw_text = _re.sub(r"<think>.*?</think>", "", raw_text, flags=_re.DOTALL | _re.IGNORECASE).strip()
-                
+
+                # Priority 1: Native Gemini thinkingConfig thought parts (gemma-4-31b-it etc.)
+                # These are extracted at the API level in _call_gemini_with_tools via `part.thought == True`
+                if getattr(response, "thinking", ""):
+                    thinking_content = response.thinking.strip()
+
+                # Priority 2: Explicit <think>...</think> XML tags (some models embed these in text)
+                if not thinking_content:
+                    think_match = _re.search(r"<think>(.*?)</think>", raw_text, _re.DOTALL | _re.IGNORECASE)
+                    if think_match:
+                        thinking_content = think_match.group(1).strip()
+                        raw_text = _re.sub(r"<think>.*?</think>", "", raw_text, flags=_re.DOTALL | _re.IGNORECASE).strip()
+
                 # Run the standard validator to strip leaked prompt structure and hallucinations.
-                # NOTE: If the model echoed the system prompt, validate_and_fix will strip it.
-                # We do NOT put that stripped content into thinking_content (it's not real thinking).
+                # We do NOT put stripped content into thinking_content (not real thinking).
                 is_valid, final_text = validator.validate_and_fix(raw_text, tool_results_summary)
-                
-                # If stripping left us with an empty string, try a graceful fallback
+
+                # If stripping left us with an empty string, emit a graceful fallback
                 if not final_text or not final_text.strip():
-                    # The entire response was leaked prompt structure — emit a minimal graceful reply
                     final_text = "Hey! How can I help you?"
                     thinking_content = ""  # Don't show stripped system prompt as thinking
 
@@ -264,7 +269,7 @@ class ConversationEngine:
                 # Save to memory
                 self._save_to_memory(user_message, final_text, tool_results_summary)
 
-                # Emit thinking event first (only genuine <think> block content)
+                # Emit thinking event first (native API thought content or <think> block)
                 if thinking_content:
                     yield json.dumps({"type": "thinking", "content": thinking_content})
 

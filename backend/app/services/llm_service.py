@@ -194,6 +194,14 @@ class LLMService:
         response = client.chat.completions.create(**request_kwargs)
         return response.choices[0].message.content or ""
 
+    # Models that support native thinking via the Gemini API thinkingConfig.
+    # The API returns thought content in separate parts with thought=True.
+    _THINKING_CAPABLE_GEMINI_MODELS = {
+        "gemma-4-31b-it", "gemma-4-9b-it",
+        "gemini-2.5-pro-preview-05-06", "gemini-2.5-flash-preview-04-17",
+        "gemini-2.5-pro-exp-03-25",
+    }
+
     def _call_gemini(
         self,
         provider: Dict,
@@ -209,18 +217,31 @@ class LLMService:
 
         client = genai.Client(api_key=provider["api_key"])
 
-        # NOTE: Do NOT set response_mime_type="application/json" here.
-        # Gemini truncates large JSON responses when that flag is set,
-        # causing clip extraction to fail silently.  The system prompt
-        # already instructs the model to return strict JSON.
+        model_name = provider["model"]
+        gen_config_kwargs: dict = {
+            "system_instruction": system_prompt,
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+            # NOTE: Do NOT set response_mime_type="application/json".
+            # Gemini truncates large JSON responses when that flag is set,
+            # causing clip extraction to fail silently.
+        }
+
+        # Enable native thinking for supported models (gemma-4-31b-it etc.)
+        supports_thinking = any(
+            model_name.startswith(m) or m in model_name
+            for m in self._THINKING_CAPABLE_GEMINI_MODELS
+        )
+        if supports_thinking:
+            try:
+                gen_config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
+            except Exception:
+                pass  # Older google-genai SDK version may not have ThinkingConfig
+
         response = client.models.generate_content(
-            model=provider["model"],
+            model=model_name,
             contents=user_message,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-            ),
+            config=types.GenerateContentConfig(**gen_config_kwargs),
         )
 
         return response.text or ""
