@@ -116,8 +116,18 @@ function ArcAvatar({ state = "idle", size = 48 }: { state?: string; size?: numbe
    THINKING BLOCK — collapsible reasoning disclosure
    ═══════════════════════════════════════════════════════════════ */
 
-function ThinkingBlock({ thinking, accentColor = "#8B5CF6" }: { thinking: string; accentColor?: string }) {
-    const [open, setOpen] = useState(false);
+function ThinkingBlock({ thinking, accentColor = "#8B5CF6", isStreaming = false }: { thinking: string; accentColor?: string; isStreaming?: boolean }) {
+    const [open, setOpen] = useState(isStreaming);
+
+    useEffect(() => {
+        if (isStreaming) {
+            setOpen(true);
+        } else if (!isStreaming && thinking.trim().length > 0) {
+            const t = setTimeout(() => setOpen(false), 600);
+            return () => clearTimeout(t);
+        }
+    }, [isStreaming, thinking]);
+
     if (!thinking || !thinking.trim()) return null;
     return (
         <div style={{
@@ -418,9 +428,23 @@ export default function ArcAgentPage() {
             setAvatarState("responding");
             scrollToBottom();
         } else if (type === "token") {
-            setMessages(prev => prev.map(m =>
-                m.id === messageId ? { ...m, content: m.content + (data.token || data.content || "") } : m
-            ));
+            setMessages(prev => prev.map(m => {
+                if (m.id === messageId) {
+                    const incomingToken = data.token || data.content || "";
+                    const raw = (m.rawContent || m.content) + incomingToken;
+                    let newContent = raw;
+                    let newThinking = m.thinking || "";
+                    
+                    const thinkMatch = raw.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+                    if (thinkMatch) {
+                        newThinking = thinkMatch[1].trim();
+                        newContent = raw.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, "").trim();
+                    }
+                    
+                    return { ...m, rawContent: raw, content: newContent, thinking: newThinking };
+                }
+                return m;
+            }));
             scrollToBottom();
         } else if (type === "done") {
             setMessages(prev => prev.map(m =>
@@ -762,7 +786,11 @@ export default function ArcAgentPage() {
                                             ) : (
                                                 <div className="arc-markdown-container">
                                                     {msg.thinking && msg.thinking.trim() && (
-                                                        <ThinkingBlock thinking={msg.thinking} accentColor="#8B5CF6" />
+                                                        <ThinkingBlock 
+                                                            thinking={msg.thinking} 
+                                                            accentColor="#8B5CF6" 
+                                                            isStreaming={msg.status === "streaming"} 
+                                                        />
                                                     )}
                                                     <MarkdownRenderer
                                                         content={msg.content || (msg.role === "assistant" ? "Response completed." : "")}

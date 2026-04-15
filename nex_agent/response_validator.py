@@ -298,13 +298,22 @@ class ResponseValidator:
         think_matches = re.findall(
             r"<think>(.*?)</think>", raw_text, re.DOTALL | re.IGNORECASE
         )
-        for m in think_matches:
-            thinking_parts.append(m.strip())
-        text = re.sub(
-            r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
-        ).strip()
+        text = raw_text
+        if think_matches:
+            for m in think_matches:
+                thinking_parts.append(m.strip())
+            text = re.sub(
+                r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
+            ).strip()
+            
+            # Since the model used tags, we TRUST the tags and skip fallback heuristics
+            thinking_str = "\n\n".join(t for t in thinking_parts if t)
+            text = re.sub(r"^\s*(Nex|Arc):\s*", "", text, flags=re.IGNORECASE).strip()
+            if not text:
+                return thinking_str, "I hit an internal formatting issue. Please try again."
+            return thinking_str, text
 
-        # ── 2. Check for leaked structure ────────────────────────────
+        # ── 2. Check for leaked structure (if no tags used) ──────────
         text_lower = text.lower()
         has_leaked = any(
             text_lower.lstrip().startswith(p.lower())
@@ -315,8 +324,7 @@ class ResponseValidator:
         if not has_leaked:
             # Clean response — strip role prefix and return
             text = re.sub(r"^\s*(Nex|Arc):\s*", "", text, flags=re.IGNORECASE)
-            thinking_str = "\n\n".join(t for t in thinking_parts if t)
-            return thinking_str, text
+            return "", text
 
         # ── 3. Backwards scan ────────────────────────────────────────
         lines = text.split("\n")

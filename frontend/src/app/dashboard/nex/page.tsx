@@ -133,8 +133,18 @@ function NexAvatar({ state = "idle", size = 48 }: { state?: string; size?: numbe
    THINKING BLOCK — collapsible reasoning disclosure
    ═══════════════════════════════════════════════════════════════ */
 
-function ThinkingBlock({ thinking, accentColor = "#6366F1" }: { thinking: string; accentColor?: string }) {
-    const [open, setOpen] = useState(false);
+function ThinkingBlock({ thinking, accentColor = "#6366F1", isStreaming = false }: { thinking: string; accentColor?: string; isStreaming?: boolean }) {
+    const [open, setOpen] = useState(isStreaming);
+
+    useEffect(() => {
+        if (isStreaming) {
+            setOpen(true);
+        } else if (!isStreaming && thinking.trim().length > 0) {
+            const t = setTimeout(() => setOpen(false), 600);
+            return () => clearTimeout(t);
+        }
+    }, [isStreaming, thinking]);
+
     if (!thinking || !thinking.trim()) return null;
     return (
         <div style={{
@@ -469,17 +479,25 @@ export default function NexAgentPage() {
             setAvatarState("responding");
             scrollToBottom();
         }
-
         else if (type === "token") {
             setMessages(prev => prev.map(m => {
                 if (m.id === messageId) {
-                    return { ...m, content: m.content + data.token };
+                    const raw = (m.rawContent || m.content) + data.token;
+                    let newContent = raw;
+                    let newThinking = m.thinking || "";
+                    
+                    const thinkMatch = raw.match(/<think>([\s\S]*?)(?:<\/think>|$)/i);
+                    if (thinkMatch) {
+                        newThinking = thinkMatch[1].trim();
+                        newContent = raw.replace(/<think>[\s\S]*?(?:<\/think>|$)/i, "").trim();
+                    }
+                    
+                    return { ...m, rawContent: raw, content: newContent, thinking: newThinking };
                 }
                 return m;
             }));
             scrollToBottom();
         }
-
         else if (type === "done") {
             setMessages(prev => prev.map(m => {
                 if (m.id === messageId) {
@@ -1009,7 +1027,11 @@ export default function NexAgentPage() {
                                                 /* Normal content */
                                                 <div className="nex-markdown-container">
                                                     {msg.thinking && msg.thinking.trim() && (
-                                                        <ThinkingBlock thinking={msg.thinking} accentColor="#6366F1" />
+                                                        <ThinkingBlock 
+                                                            thinking={msg.thinking} 
+                                                            accentColor="#6366F1" 
+                                                            isStreaming={msg.status === "streaming"} 
+                                                        />
                                                     )}
                                                     <MarkdownRenderer
                                                         content={msg.content || (msg.role === "assistant" ? "Response completed." : "")}
