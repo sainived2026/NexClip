@@ -39,6 +39,9 @@ from nex_agent.core import get_nex_agent
 from nex_agent.request_context import reset_request_context, set_request_context
 from nex_agent.websocket import ws_manager
 from nex_agent.agent_bus import get_agent_bus
+from nex_agent.response_validator import ResponseValidator
+
+_validator = ResponseValidator()
 
 # ── Logging ─────────────────────────────────────────────────────
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nex_agent_memory")
@@ -250,6 +253,9 @@ async def ws_chat(
                             sm.append_tokens(assistant_msg_id, chunk)
                         await ws_manager.broadcast_token(user_id, assistant_msg_id, chunk)
 
+                # Extract thinking vs clean answer before finalising
+                thinking_content, clean_content = _validator.extract_thinking_and_clean(full_content)
+
                 # Finalize the stream as complete
                 if sm:
                     sm.finalize_stream(
@@ -259,7 +265,8 @@ async def ws_chat(
 
                 await ws_manager.send_stream_event(
                     user_id, assistant_msg_id, "done", {
-                        "full_content": full_content,
+                        "full_content": clean_content or full_content,
+                        "thinking_content": thinking_content,
                         "tool_calls": tool_calls_list,
                     }
                 )

@@ -37,6 +37,9 @@ if BACKEND_PATH not in sys.path:
 from nexearch.arc.api import router as arc_router
 from nexearch.arc.core import get_arc_agent
 from nexearch.arc.websocket import arc_ws_manager
+from nex_agent.response_validator import ResponseValidator
+
+_validator = ResponseValidator()
 
 # ── Logging ─────────────────────────────────────────────────────
 LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arc_agent_memory")
@@ -231,6 +234,9 @@ async def ws_chat(
                             sm.append_tokens(assistant_msg_id, chunk)
                         await arc_ws_manager.broadcast_token(user_id, assistant_msg_id, chunk)
 
+                # Extract thinking vs clean answer before sending done
+                thinking_content, clean_content = _validator.extract_thinking_and_clean(full_content)
+
                 # Finalize
                 if sm:
                     sm.finalize_stream(
@@ -240,7 +246,8 @@ async def ws_chat(
 
                 await arc_ws_manager.send_stream_event(
                     user_id, assistant_msg_id, "done", {
-                        "full_content": full_content,
+                        "full_content": clean_content or full_content,
+                        "thinking_content": thinking_content,
                         "tool_calls": tool_calls_list,
                     }
                 )

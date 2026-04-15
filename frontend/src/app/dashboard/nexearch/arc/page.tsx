@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
     Send, Plus, Trash2, RefreshCw, X,
     Zap, Activity, Brain, Bot, Wrench, Users,
-    Database, Globe, Copy, Check, ChevronRight,
+    Database, Globe, Copy, Check, ChevronRight, ChevronDown,
     AlertCircle, Wifi, WifiOff, RotateCcw
 } from "lucide-react";
 import { arcAgentAPI } from "@/lib/api";
@@ -23,6 +23,7 @@ interface Message {
     timestamp: string;
     status: "streaming" | "complete" | "error";
     error_detail?: string;
+    thinking?: string;  // collapsible reasoning content
 }
 
 interface Conversation {
@@ -73,6 +74,84 @@ function ArcAvatar({ state = "idle", size = 48 }: { state?: string; size?: numbe
                     <linearGradient id="arcCrystalGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor="rgba(139,92,246,0.3)" /><stop offset="100%" stopColor="rgba(6,182,212,0.2)" /></linearGradient>
                 </defs>
             </svg>
+        </div>
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   THINKING BLOCK — collapsible reasoning disclosure
+   ═══════════════════════════════════════════════════════════════ */
+
+function ThinkingBlock({ thinking, accentColor = "#8B5CF6" }: { thinking: string; accentColor?: string }) {
+    const [open, setOpen] = useState(false);
+    if (!thinking || !thinking.trim()) return null;
+    return (
+        <div style={{
+            marginBottom: 8,
+            borderRadius: 8,
+            border: `1px solid ${accentColor}28`,
+            background: `${accentColor}08`,
+            overflow: "hidden",
+        }}>
+            <button
+                onClick={() => setOpen(o => !o)}
+                style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    width: "100%",
+                    padding: "6px 10px",
+                    background: "transparent",
+                    border: "none",
+                    cursor: "pointer",
+                    color: accentColor,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    opacity: 0.85,
+                }}
+            >
+                <span style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 14,
+                    height: 14,
+                    borderRadius: "50%",
+                    background: `${accentColor}25`,
+                    fontSize: 8,
+                }}>💭</span>
+                Thinking
+                <ChevronDown
+                    size={12}
+                    style={{
+                        marginLeft: "auto",
+                        transform: open ? "rotate(180deg)" : "rotate(0deg)",
+                        transition: "transform 0.2s ease",
+                        opacity: 0.7,
+                    }}
+                />
+            </button>
+            {open && (
+                <div style={{
+                    padding: "0 10px 10px",
+                    borderTop: `1px solid ${accentColor}18`,
+                    maxHeight: 320,
+                    overflowY: "auto",
+                }}>
+                    <pre style={{
+                        margin: 0,
+                        paddingTop: 8,
+                        fontSize: 11,
+                        lineHeight: 1.6,
+                        color: "rgba(200,200,220,0.55)",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
+                        fontFamily: "'SF Mono', 'Fira Code', monospace",
+                    }}>{thinking}</pre>
+                </div>
+            )}
         </div>
     );
 }
@@ -310,7 +389,12 @@ export default function ArcAgentPage() {
             scrollToBottom();
         } else if (type === "done") {
             setMessages(prev => prev.map(m =>
-                m.id === messageId ? { ...m, status: "complete", content: data.full_content || m.content } : m
+                m.id === messageId ? {
+                    ...m,
+                    status: "complete",
+                    content: data.full_content || m.content,
+                    thinking: data.thinking_content || m.thinking || "",
+                } : m
             ));
             setIsStreaming(false); setAvatarState("idle"); scrollToBottom();
             loadConversations();
@@ -588,6 +672,9 @@ export default function ArcAgentPage() {
                                                 </div>
                                             ) : (
                                                 <div className="arc-markdown-container">
+                                                    {msg.thinking && msg.thinking.trim() && (
+                                                        <ThinkingBlock thinking={msg.thinking} accentColor="#8B5CF6" />
+                                                    )}
                                                     <MarkdownRenderer
                                                         content={msg.content || (msg.role === "assistant" ? "Response completed." : "")}
                                                         isStreaming={msg.status === "streaming"}

@@ -162,6 +162,101 @@ class ResponseValidator:
 
     # ─────────────────────────────────────────────────────────────
 
+    def extract_thinking_and_clean(self, raw_text: str) -> tuple:
+        """
+        Separate LLM output into (thinking_content, clean_answer).
+
+        Returns a 2-tuple:
+          - thinking_content: everything that looks like internal reasoning
+            / leaked prompt structure (may be empty string)
+          - clean_answer: the actual user-facing response
+
+        This allows callers to SHOW the thinking in a collapsible block
+        rather than silently dropping it.
+        """
+        if not raw_text or not raw_text.strip():
+            return "", raw_text
+
+        thinking_parts: list = []
+
+        # ── 1. Extract explicit <think>...</think> XML blocks ─────
+        think_matches = re.findall(
+            r"<think>(.*?)</think>", raw_text, re.DOTALL | re.IGNORECASE
+        )
+        for match in think_matches:
+            thinking_parts.append(match.strip())
+
+        # Remove the <think> tags from text before further processing
+        remaining = re.sub(
+            r"<think>.*?</think>", "", raw_text, flags=re.DOTALL | re.IGNORECASE
+        ).strip()
+
+        # ── 2. Extract leaked prompt-structure blocks ─────────────
+        # (lines starting with User:, Context:, Identity:, Constraint:, etc.)
+        lines = remaining.split("\n")
+        leaked_block: list = []
+        clean_lines: list = []
+        in_leaked = False
+
+        for line in lines:
+            stripped = line.strip()
+            # Starts with a known leaked-prompt prefix?
+            if any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
+                in_leaked = True
+                leaked_block.append(line)
+            elif in_leaked and re.match(r"^(\d+\.|-|\*)\s", stripped):
+                leaked_block.append(line)
+            elif in_leaked:
+                if not stripped:
+                    leaked_block.append(line)  # blank line inside block
+                else:
+                    in_leaked = False
+                    clean_lines.append(line)   # first real content after block
+            else:
+                clean_lines.append(line)
+
+        if leaked_block:
+            thinking_parts.append("\n".join(leaked_block).strip())
+
+        remaining = "\n".join(clean_lines).strip()
+
+        # ── 3. Extract reasoning keyword echo lines ───────────────
+        # (PLAN:, UNDERSTAND:, EXECUTE:, etc.)
+        kw_lines: list = []
+        final_lines: list = []
+        in_kw_block = False
+        for line in remaining.split("\n"):
+            stripped = line.strip()
+            if any(stripped.startswith(kw) for kw in self.REASONING_KEYWORDS):
+                in_kw_block = True
+                kw_lines.append(line)
+            elif in_kw_block and stripped and not any(
+                stripped.startswith(kw) for kw in self.REASONING_KEYWORDS
+            ):
+                in_kw_block = False
+                final_lines.append(line)
+            elif in_kw_block:
+                kw_lines.append(line)
+            else:
+                final_lines.append(line)
+
+        if kw_lines:
+            thinking_parts.append("\n".join(kw_lines).strip())
+
+        clean = "\n".join(final_lines).strip()
+
+        # ── 4. Strip leading Nex:/Arc: prefix ─────────────────────
+        clean = re.sub(r"^\s*(Nex|Arc):\s*", "", clean, flags=re.IGNORECASE)
+
+        # ── Safety: if everything got stripped, return original ───
+        if not clean:
+            return "", raw_text
+
+        thinking_str = "\n\n".join(t for t in thinking_parts if t)
+        return thinking_str, clean
+
+    # ─────────────────────────────────────────────────────────────
+
     def validate_and_fix(
         self,
         response_text: str,
