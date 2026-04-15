@@ -54,6 +54,7 @@ def test_collect_chat_stream_result_aggregates_tokens_and_tool_calls():
     result = _collect_chat_stream_result(agent, "hello")
 
     assert result["response"] == "Arc ready"
+    assert "Executed `arc_search_tools`" in result["thinking_content"]
     assert len(result["tool_calls"]) == 1
     assert result["tool_calls"][0]["name"] == "arc_search_tools"
 
@@ -61,7 +62,6 @@ def test_collect_chat_stream_result_aggregates_tokens_and_tool_calls():
 def test_arc_chat_route_persists_sync_response_text(monkeypatch):
     class FakeStreamingManager:
         def __init__(self):
-            self.appended = []
             self.finalized = []
 
         def create_conversation(self, conversation_id: str, user_id: str = "admin"):
@@ -73,11 +73,8 @@ def test_arc_chat_route_persists_sync_response_text(monkeypatch):
         def create_stream(self, message_id: str, conversation_id: str, user_id: str):
             self.stream_id = message_id
 
-        def append_tokens(self, message_id: str, tokens: str):
-            self.appended.append((message_id, tokens))
-
-        def finalize_stream(self, message_id: str, tool_calls=None, error=None):
-            self.finalized.append((message_id, tool_calls, error))
+        def finalize_stream(self, message_id: str, tool_calls=None, error=None, final_content=None, thinking_content=""):
+            self.finalized.append((message_id, tool_calls, error, final_content, thinking_content))
 
     class FakeAgent:
         def __init__(self, streaming_manager):
@@ -95,8 +92,8 @@ def test_arc_chat_route_persists_sync_response_text(monkeypatch):
     response = asyncio.run(arc_api.chat(arc_api.ChatRequest(message="hello")))
 
     assert response.response == "Arc ready"
-    assert fake_sm.appended == [(fake_sm.stream_id, "Arc ready")]
     assert fake_sm.finalized[0][0] == fake_sm.stream_id
+    assert fake_sm.finalized[0][3] == "Arc ready"
 
 
 def test_arc_streaming_manager_conversation_crud_and_message_shape():

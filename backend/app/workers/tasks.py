@@ -205,6 +205,22 @@ def _build_completion_project_update(
     }
 
 
+def _normalize_pipeline_error_message(error: Exception | str) -> str:
+    """
+    Convert low-level pipeline errors into user-actionable project messages.
+    """
+    text = str(error or "").strip()
+    lowered = text.lower()
+
+    if "confirm you're not a bot" in lowered or "[youtube]" in lowered and "cookies" in lowered:
+        return (
+            "YouTube blocked the server download. Export fresh authenticated cookies "
+            "to backend/cookies.txt, restart the backend and Celery worker, then retry."
+        )
+
+    return text[:1000]
+
+
 def _generate_video_summary(segments, project, project_folder, storage):
     """Generate a brief summary of the video content from its transcription."""
     from app.services.llm_service import LLMService
@@ -596,7 +612,7 @@ def process_video_task(self, project_id: str):
         _update_project(
             db, project_id,
             status=ProjectStatus.FAILED,
-            error_message=str(e)[:1000],
+            error_message=_normalize_pipeline_error_message(e),
             status_message="Processing failed. Please try again.",
         )
         raise

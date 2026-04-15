@@ -45,6 +45,20 @@ function dedupeClips(clips: any[] = []) {
     return Array.from(seen.values()).sort((a, b) => (a.rank || 0) - (b.rank || 0));
 }
 
+function getFriendlyProjectError(errorMessage?: string) {
+    const message = String(errorMessage || "").trim();
+    const lowered = message.toLowerCase();
+
+    if (
+        lowered.includes("confirm you're not a bot") ||
+        (lowered.includes("[youtube]") && lowered.includes("cookies"))
+    ) {
+        return "YouTube blocked the server download. Export fresh authenticated cookies to `backend/cookies.txt`, restart the backend and Celery worker, then retry the project.";
+    }
+
+    return message || "An error occurred during processing.";
+}
+
 /* ── Inline Video Card Component ─────────────────────────────── */
 function ClipCard({ clip, index, onExpand, styles, onOpenGallery, globalAspect, onApplyStyle }: { clip: any; index: number; onExpand: () => void; styles: any[]; onOpenGallery: (clipId: string) => void; globalAspect?: string; onApplyStyle?: (clipId: string, styleId: string, aspect: string) => void }) {
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -569,10 +583,10 @@ export default function ProjectDetailPage() {
             {project.status === "FAILED" && (
                 <div className="p-6 rounded-2xl bg-red-500/5 border border-red-500/20 mb-8">
                     <div className="flex items-center gap-3">
-                        <AlertCircle className="w-5 h-5 text-red-400" />
+                            <AlertCircle className="w-5 h-5 text-red-400" />
                         <div>
                             <h3 className="text-sm font-medium text-red-400">Processing Failed</h3>
-                            <p className="text-xs text-red-400/70 mt-1">{project.error_message || "An error occurred during processing."}</p>
+                            <p className="text-xs text-red-400/70 mt-1">{getFriendlyProjectError(project.error_message)}</p>
                         </div>
                     </div>
                 </div>

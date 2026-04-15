@@ -210,6 +210,7 @@ async def chat_stream(
 
         full_content = ""
         tool_calls_list = []
+        status_events = []
         validator = ResponseValidator()
         context_tokens = set_request_context(user_id, req.conversation_id)
         try:
@@ -230,6 +231,8 @@ async def chat_stream(
                             "arguments": parsed.get("arguments"),
                             "result": parsed.get("result"),
                         })
+                    elif event_type == "status":
+                        status_events.append(parsed)
 
                 except json.JSONDecodeError:
                     pass
@@ -238,6 +241,11 @@ async def chat_stream(
 
             # Finalize
             thinking_content, clean_content = validator.sanitize_chat_response(full_content)
+            if not thinking_content.strip():
+                thinking_content = validator.build_visible_reasoning(
+                    status_events=status_events,
+                    tool_calls=tool_calls_list,
+                )
             if sm:
                 sm.finalize_stream(
                     assistant_msg_id,

@@ -205,6 +205,7 @@ async def ws_chat(
 
             # Stream the response
             tool_calls_list = []
+            status_events = []
             full_content = ""
             context_tokens = set_request_context(user_id, conv_id)
             try:
@@ -231,6 +232,7 @@ async def ws_chat(
                             )
 
                         elif event_type == "status":
+                            status_events.append(parsed)
                             await ws_manager.send_stream_event(
                                 user_id, assistant_msg_id, "status", parsed
                             )
@@ -255,6 +257,11 @@ async def ws_chat(
 
                 # Build a safe final answer so leaked prompt text never reaches the UI
                 thinking_content, clean_content = _validator.sanitize_chat_response(full_content)
+                if not thinking_content.strip():
+                    thinking_content = _validator.build_visible_reasoning(
+                        status_events=status_events,
+                        tool_calls=tool_calls_list,
+                    )
 
                 # Finalize the stream as complete
                 if sm:

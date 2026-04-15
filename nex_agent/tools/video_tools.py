@@ -151,6 +151,13 @@ def _publish_proactive_message(
     context = target_context or {}
     user_id = (context.get("user_id") or "").strip()
     conversation_id = (context.get("conversation_id") or "").strip()
+    if user_id and not conversation_id:
+        conversation_id = (ws_manager.get_active_conversation(user_id) or "").strip()
+
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
+    if user_id:
+        payload["user_id"] = user_id
 
     try:
         agent = get_nex_agent()
@@ -174,19 +181,10 @@ def _publish_proactive_message(
         except Exception as ws_err:
             logger.warning(f"Thread-safe proactive dispatch failed: {ws_err}")
 
-    delivered = False
-    for connected_user_id in list(ws_manager.connections.keys()):
-        try:
-            delivered = ws_manager.dispatch_to_user(connected_user_id, payload) or delivered
-        except Exception as ws_err:
-            logger.warning(f"Broadcast proactive dispatch failed for {connected_user_id}: {ws_err}")
-
-    if not delivered:
-        try:
-            agent = get_nex_agent()
-            agent.broadcaster.broadcast(payload)
-        except Exception as queue_err:
-            logger.warning(f"Failed to queue proactive message: {queue_err}")
+    logger.info(
+        "Skipped proactive chat dispatch because no user-scoped target was available "
+        f"(conversation_id={conversation_id or 'none'})"
+    )
 
     return payload["message_id"]
 

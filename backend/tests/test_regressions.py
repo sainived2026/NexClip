@@ -31,10 +31,12 @@ from app.workers.tasks import (
     ProjectTaskLock,
     _build_completion_project_update,
     _build_completion_status_message,
+    _normalize_pipeline_error_message,
 )
 from app.db.models import User
 from nex_agent.llm_provider import _load_env_value, _sanitize_env_value as sanitize_nex_agent_env_value
 from nex_agent.conversation_engine import ConversationEngine
+from nex_agent.response_validator import ResponseValidator
 from nex_agent.tools.video_tools import _send_proactive_chat
 from nexearch.arc.tools.arc_tools import _resolve_playwright_credentials
 from nexearch.config import NexearchSettings
@@ -556,3 +558,29 @@ def test_send_proactive_chat_persists_and_dispatches_to_target_conversation(monk
     assert saved_messages[0]["content"] == "Clips generated successfully."
     assert dispatched[0][0] == "user_1"
     assert dispatched[0][1]["content"] == "Clips generated successfully."
+
+
+def test_response_validator_build_visible_reasoning_summarizes_status_and_tools():
+    reasoning = ResponseValidator().build_visible_reasoning(
+        status_events=[
+            {"content": "Executing: nexearch_chat_with_arc"},
+            {"content": "Analyzing results..."},
+        ],
+        tool_calls=[
+            {"name": "nexearch_chat_with_arc", "result": {"success": True}},
+            {"name": "nex_process_video", "result": {"status": "processing"}},
+        ],
+    )
+
+    assert "Status: Executing: nexearch_chat_with_arc" in reasoning
+    assert "Coordinated with Arc Agent" in reasoning
+    assert "Started video processing" in reasoning
+
+
+def test_normalize_pipeline_error_message_rewrites_youtube_bot_block():
+    normalized = _normalize_pipeline_error_message(
+        "ERROR: [youtube] abc123: Sign in to confirm you're not a bot. Use --cookies-from-browser."
+    )
+
+    assert "backend/cookies.txt" in normalized
+    assert "Celery worker" in normalized

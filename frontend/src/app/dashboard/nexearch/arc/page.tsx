@@ -41,6 +41,33 @@ function extractThinkingPayload(message: any): string {
     return "";
 }
 
+function appendThinkingEntry(existing: string | undefined, entry: string): string {
+    const cleanEntry = String(entry || "").trim().replace(/\s+/g, " ");
+    if (!cleanEntry) return existing || "";
+
+    const current = (existing || "").trim();
+    const nextLine = `- ${cleanEntry}`;
+    const currentLines = current ? current.split("\n").map(line => line.trim()) : [];
+    if (currentLines.includes(nextLine)) {
+        return current;
+    }
+    return current ? `${current}\n${nextLine}` : nextLine;
+}
+
+function buildToolThinkingLabel(data: any): string {
+    const toolName = String(data?.name || "").trim();
+    if (!toolName) return "Running a tool";
+
+    if (toolName === "arc_talk_to_nex_agent") {
+        return data?.status === "complete" ? "Nex Agent responded" : "Consulting Nex Agent";
+    }
+    if (toolName === "arc_nexclip_upload_clips") {
+        return data?.status === "complete" ? "Clip upload task completed" : "Uploading clips";
+    }
+
+    return data?.status === "complete" ? `Completed ${toolName}` : `Executing ${toolName}`;
+}
+
 const ARC_API = "http://localhost:8003/api";
 const ARC_WS = "ws://localhost:8003/ws/chat";
 
@@ -379,12 +406,12 @@ export default function ArcAgentPage() {
             const localId = pendingMsgIdRef.current;
             if (localId && serverId && localId !== serverId) {
                 setMessages(prev => prev.map(m =>
-                    m.id === localId ? { ...m, id: serverId } : m
+                    m.id === localId ? { ...m, id: serverId, thinking: m.thinking || "- Preparing response" } : m
                 ));
             } else if (!localId) {
                 // No local placeholder — create one (fallback)
                 setMessages(prev => [...prev, {
-                    id: serverId, role: "assistant", content: "", timestamp: now(), status: "streaming",
+                    id: serverId, role: "assistant", content: "", timestamp: now(), status: "streaming", thinking: "- Preparing response",
                 }]);
             }
             pendingMsgIdRef.current = null;
@@ -461,6 +488,15 @@ export default function ArcAgentPage() {
             if (data.status === "streaming") { setIsStreaming(true); setAvatarState("responding"); }
             else { setIsStreaming(false); setAvatarState("idle"); }
             scrollToBottom();
+        } else if (type === "tool_call") {
+            setMessages(prev => prev.map(m =>
+                m.id === messageId ? { ...m, thinking: appendThinkingEntry(m.thinking, buildToolThinkingLabel(data)) } : m
+            ));
+        } else if (type === "status") {
+            const statusText = data.content || data.message || data.status || "";
+            setMessages(prev => prev.map(m =>
+                m.id === messageId ? { ...m, thinking: appendThinkingEntry(m.thinking, statusText) } : m
+            ));
         }
     }, [scrollToBottom, loadConversations]);
 
@@ -481,6 +517,7 @@ export default function ArcAgentPage() {
             content: "",
             timestamp: now(),
             status: "streaming",
+            thinking: "- Preparing response",
         }]);
         scrollToBottom();
 
@@ -497,7 +534,7 @@ export default function ArcAgentPage() {
     /* ── SSE fallback ─────────────────────────────────────────── */
     const sendViaSse = async (msg: string) => {
         const aId = genId();
-        setMessages(prev => [...prev, { id: aId, role: "assistant", content: "", timestamp: now(), status: "streaming" }]);
+        setMessages(prev => [...prev, { id: aId, role: "assistant", content: "", timestamp: now(), status: "streaming", thinking: "- Preparing response" }]);
         setAvatarState("responding");
         try {
             const res = await fetch(`${ARC_API}/chat`, {

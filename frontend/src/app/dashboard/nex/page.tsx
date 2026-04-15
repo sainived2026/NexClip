@@ -55,6 +55,36 @@ function extractThinkingPayload(message: any): string {
     return "";
 }
 
+function appendThinkingEntry(existing: string | undefined, entry: string): string {
+    const cleanEntry = String(entry || "").trim().replace(/\s+/g, " ");
+    if (!cleanEntry) return existing || "";
+
+    const current = (existing || "").trim();
+    const nextLine = `- ${cleanEntry}`;
+    const currentLines = current ? current.split("\n").map(line => line.trim()) : [];
+    if (currentLines.includes(nextLine)) {
+        return current;
+    }
+    return current ? `${current}\n${nextLine}` : nextLine;
+}
+
+function buildToolThinkingLabel(data: any): string {
+    const toolName = String(data?.name || "").trim();
+    if (!toolName) return "Running a tool";
+
+    if (toolName === "nexearch_chat_with_arc") {
+        return data?.status === "complete" ? "Arc Agent returned intelligence" : "Consulting Arc Agent";
+    }
+    if (toolName === "nex_process_pipeline") {
+        return data?.status === "complete" ? "Full pipeline prepared" : "Preparing the full clip pipeline";
+    }
+    if (toolName === "nex_process_video") {
+        return data?.status === "complete" ? "Video processing started" : "Starting video processing";
+    }
+
+    return data?.status === "complete" ? `Completed ${toolName}` : `Executing ${toolName}`;
+}
+
 const NEX_API = "http://localhost:8001/api/nex";
 const NEX_WS = "ws://localhost:8001/ws/chat";
 
@@ -427,12 +457,12 @@ export default function NexAgentPage() {
             const localId = pendingMsgIdRef.current;
             if (localId && serverId && localId !== serverId) {
                 setMessages(prev => prev.map(m =>
-                    m.id === localId ? { ...m, id: serverId } : m
+                    m.id === localId ? { ...m, id: serverId, thinking: m.thinking || "- Preparing response" } : m
                 ));
             } else if (!localId) {
                 // No local placeholder — add fallback
                 setMessages(prev => [...prev, {
-                    id: serverId, role: "assistant" as const, content: "", timestamp: now(), status: "streaming" as const,
+                    id: serverId, role: "assistant" as const, content: "", timestamp: now(), status: "streaming" as const, thinking: "- Preparing response",
                 }]);
             }
             pendingMsgIdRef.current = null;
@@ -525,10 +555,24 @@ export default function NexAgentPage() {
         }
 
         else if (type === "tool_call") {
-            // Could show tool call indicator — skip for now
+            const thinkingLine = buildToolThinkingLabel(data);
+            setMessages(prev => prev.map(m =>
+                m.id === messageId ? { ...m, thinking: appendThinkingEntry(m.thinking, thinkingLine) } : m
+            ));
+        }
+
+        else if (type === "status") {
+            const statusText = data.content || data.message || data.status || "";
+            setMessages(prev => prev.map(m =>
+                m.id === messageId ? { ...m, thinking: appendThinkingEntry(m.thinking, statusText) } : m
+            ));
         }
 
         else if (type === "proactive_message") {
+            if (data.conversation_id && data.conversation_id !== activeConvId) {
+                loadConversations();
+                return;
+            }
             const proactiveMsg: Message = {
                 id: messageId || genId(),
                 role: "assistant",
@@ -549,7 +593,7 @@ export default function NexAgentPage() {
             scrollToBottom();
             loadConversations();
         }
-    }, [scrollToBottom, loadConversations]);
+    }, [scrollToBottom, loadConversations, activeConvId]);
 
     /* ── Send message via WebSocket ───────────────────────────── */
     const sendMessage = async (text?: string) => {
@@ -604,6 +648,7 @@ export default function NexAgentPage() {
             content: "",
             timestamp: now(),
             status: "streaming",
+            thinking: "- Preparing response",
         };
         setMessages(prev => [...prev, assistantMsg]);
         setAvatarState("responding");
@@ -640,6 +685,15 @@ export default function NexAgentPage() {
                                 m.id === assistantMsg.id ? { ...m, content: fullContent } : m
                             ));
                             scrollToBottom();
+                        } else if (data.type === "status") {
+                            const statusText = data.content || data.message || data.status || "";
+                            setMessages(prev => prev.map(m =>
+                                m.id === assistantMsg.id ? { ...m, thinking: appendThinkingEntry(m.thinking, statusText) } : m
+                            ));
+                        } else if (data.type === "tool_call") {
+                            setMessages(prev => prev.map(m =>
+                                m.id === assistantMsg.id ? { ...m, thinking: appendThinkingEntry(m.thinking, buildToolThinkingLabel(data)) } : m
+                            ));
                         } else if (data.type === "done") {
                             setMessages(prev => prev.map(m =>
                                 m.id === assistantMsg.id ? {

@@ -427,6 +427,77 @@ class ResponseValidator:
         final_text = (clean or stripped or raw_text or fallback_message).strip()
         return thinking, final_text or fallback_message
 
+    def build_visible_reasoning(
+        self,
+        status_events: List[Dict[str, Any]] | None = None,
+        tool_calls: List[Dict[str, Any]] | None = None,
+    ) -> str:
+        """
+        Build a user-visible reasoning summary from explicit execution events.
+
+        This is a safe fallback when the model does not expose any `<think>` block
+        but the UI still needs a collapsible "what happened" panel.
+        """
+        lines: List[str] = []
+        seen: set[str] = set()
+
+        for event in status_events or []:
+            text = str(
+                event.get("content")
+                or event.get("message")
+                or event.get("status")
+                or ""
+            ).strip()
+            if not text:
+                continue
+            normalized = f"Status: {re.sub(r'\\s+', ' ', text)}"
+            lowered = normalized.lower()
+            if lowered not in seen:
+                lines.append(normalized)
+                seen.add(lowered)
+
+        for call in tool_calls or []:
+            summary = self._summarize_tool_call_for_reasoning(call)
+            if not summary:
+                continue
+            lowered = summary.lower()
+            if lowered not in seen:
+                lines.append(summary)
+                seen.add(lowered)
+
+        if not lines:
+            return ""
+
+        return "\n".join(f"- {line}" for line in lines[:12])
+
+    def _summarize_tool_call_for_reasoning(self, call: Dict[str, Any]) -> str:
+        name = str(call.get("name") or "").strip()
+        if not name:
+            return ""
+
+        result = call.get("result")
+        status = "completed"
+        if isinstance(result, dict):
+            if result.get("error"):
+                status = "failed"
+            elif result.get("success") is False:
+                status = "failed"
+            elif str(result.get("status", "")).lower() in {"error", "failed"}:
+                status = "failed"
+
+        collaboration_labels = {
+            "nexearch_chat_with_arc": "Coordinated with Arc Agent",
+            "arc_talk_to_nex_agent": "Coordinated with Nex Agent",
+            "arc_nexclip_upload_clips": "Arc Agent handled clip publishing",
+            "nex_process_pipeline": "Started the full clip pipeline",
+            "nex_process_video": "Started video processing",
+        }
+        label = collaboration_labels.get(name, f"Executed `{name}`")
+
+        if status == "failed":
+            return f"{label} (failed)"
+        return label
+
 
     def validate_and_fix(
         self,

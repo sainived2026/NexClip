@@ -27,6 +27,7 @@ class ChatResponse(BaseModel):
     response: str
     conversation_id: str
     tool_calls: int = 0
+    thinking_content: str = ""
 
 
 def _collect_chat_stream_result(agent, message: str, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -35,6 +36,7 @@ def _collect_chat_stream_result(agent, message: str, context: Optional[Dict[str,
 
     response_parts = []
     tool_calls = []
+    status_events = []
     errors = []
 
     for chunk in agent.chat_stream(message, context=context):
@@ -54,17 +56,26 @@ def _collect_chat_stream_result(agent, message: str, context: Optional[Dict[str,
                     "arguments": parsed.get("arguments", {}),
                     "result": parsed.get("result"),
                 })
+        elif event_type == "status":
+            status_events.append(parsed)
         elif event_type == "error":
             errors.append(parsed.get("content", "Unknown error"))
 
     raw_response = "".join(response_parts).strip()
-    _, response_text = ResponseValidator().sanitize_chat_response(raw_response)
+    validator = ResponseValidator()
+    thinking_content, response_text = validator.sanitize_chat_response(raw_response)
+    if not thinking_content.strip():
+        thinking_content = validator.build_visible_reasoning(
+            status_events=status_events,
+            tool_calls=tool_calls,
+        )
     if not response_text and errors:
         response_text = errors[-1]
 
     return {
         "response": response_text,
         "tool_calls": tool_calls,
+        "thinking_content": thinking_content,
         "errors": errors,
     }
 
@@ -107,12 +118,12 @@ async def chat(request: ChatRequest):
 
     if sm:
         try:
-            if collected["response"]:
-                sm.append_tokens(assistant_msg_id, collected["response"])
             sm.finalize_stream(
                 assistant_msg_id,
                 tool_calls=collected["tool_calls"] if collected["tool_calls"] else None,
                 error=collected["errors"][-1] if collected["errors"] else None,
+                final_content=collected["response"],
+                thinking_content=collected["thinking_content"],
             )
         except Exception:
             pass
@@ -121,6 +132,7 @@ async def chat(request: ChatRequest):
         response=collected["response"],
         conversation_id=conv_id,
         tool_calls=len(collected["tool_calls"]),
+        thinking_content=collected["thinking_content"],
     )
 
 
