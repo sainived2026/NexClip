@@ -31,6 +31,28 @@ class ResponseValidator:
         "THOUGHT:", "THINKING:", "OBSERVATION:", "ACTION:", "REFLECTION:",
     ]
 
+    # ── Leaked prompt-structure line prefixes ─────────────────────
+    # These are labels that appear when a reasoning model echoes the
+    # few-shot prompt structure back verbatim (seen in screenshot).
+    _LEAKED_PROMPT_LINE_PREFIXES: Tuple[str, ...] = (
+        "User input:",
+        "User said:",
+        "Role:",
+        "Constraints:",
+        "RULES —",
+        "RULES:",
+        "Example good responses:",
+        "Example responses:",
+        "Natural hello,",
+        "No reasoning",
+        "No keywords",
+        "No technical",
+        "No lists",
+        "No prefixes",
+        "One short sentence",
+        "Just say hello",
+    )
+
     # ── Raw-prose thinking sentence starters ──────────────────────
     # If a paragraph's opening text matches any of these, the paragraph is
     # treated as internal chain-of-thought and silently dropped.
@@ -187,17 +209,19 @@ class ResponseValidator:
         """
         Strips ALL internal reasoning content from model output.
 
-        Handles four distinct patterns:
+        Handles five distinct patterns:
 
         1. <think>...</think> XML blocks       (Qwen3, DeepSeek-R1, some OpenRouter)
         2. <|thinking|>...</|thinking|> tokens  (variant format)
         3. Reasoning keyword echo lines         (PLAN:, UNDERSTAND:, EXECUTE: …)
-        4. Raw-prose thinking paragraph blocks  (Gemini and OpenRouter reasoning models
-           that output their CoT as plain text paragraphs, with NO XML wrapper,
-           BEFORE writing the user-facing answer)
+        4. Raw-prose thinking paragraph blocks  (Gemini/OpenRouter CoT paragraphs)
+        5. Leaked prompt-structure blocks       (gemma echoing User input:/Role:/Constraints:)
         """
         if not text:
             return text
+
+        # 0. Strip leaked prompt structure FIRST (catches gemma-style echoed prompts)
+        text = self._strip_leaked_prompt_structure(text)
 
         # 1. <think>…</think>
         text = re.sub(
@@ -218,8 +242,11 @@ class ResponseValidator:
         # 3. Reasoning keyword echo lines
         text = self._strip_keyword_block_lines(text)
 
-        # 4. Raw-prose thinking paragraphs (the Gemini "leaked thoughts" pattern)
+        # 4. Raw-prose thinking paragraphs
         text = self._strip_raw_thinking_paragraphs(text)
+
+        # 5. Strip leading 'Nex:' prefix (from few-shot prompt tail)
+        text = re.sub(r"^\s*Nex:\s*", "", text, flags=re.IGNORECASE)
 
         # Tidy up extra blank lines left by stripping
         text = re.sub(r"\n{3,}", "\n\n", text)
@@ -227,6 +254,62 @@ class ResponseValidator:
         return text.strip()
 
     # ─────────────────────────────────────────────────────────────
+
+    def _strip_leaked_prompt_structure(self, text: str) -> str:
+        """
+        Removes blocks where the model echoed the system-prompt structure.
+        Detects ANY line starting with a known leaked-prompt prefix and drops
+        ALL consecutive lines that are part of that block.
+
+        Also handles the specific pattern seen in the screenshot where the
+        model outputs:
+            User input: "..."
+            Role: ...
+            Constraints:
+            ...
+            <actual answer>
+        We find the last quoted string in the block and return only that.
+        """
+        lines = text.split("\n")
+
+        # Quick check — if none of the known prefixes appear, skip expensive work
+        joined_lower = "\n".join(lines[:20]).lower()
+        has_leak = any(
+            p.lower() in joined_lower for p in self._LEAKED_PROMPT_LINE_PREFIXES
+        )
+        if not has_leak:
+            return text
+
+        # Walk lines, stripping any that start with a known leaked-prompt prefix
+        # OR that are part of a numbered/bulleted list in such a block.
+        clean: List[str] = []
+        in_leaked_block = False
+        for line in lines:
+            stripped = line.strip()
+            if any(stripped.startswith(p) for p in self._LEAKED_PROMPT_LINE_PREFIXES):
+                in_leaked_block = True
+                continue
+            # Numbered rules or dash-quoted examples inside a leaked block
+            if in_leaked_block and re.match(r'^(\d+\.|-|\*)\s', stripped):
+                continue
+            # Exit leaked block on first blank line or real content
+            if in_leaked_block:
+                if not stripped:
+                    continue  # skip blank lines inside the block
+                else:
+                    in_leaked_block = False  # real content follows
+            clean.append(line)
+
+        result = "\n".join(clean).strip()
+
+        # If the whole text was wiped, try extracting the last quoted string
+        # (which is usually the actual intended response in few-shot prompts)
+        if not result and text:
+            quoted = re.findall(r'"([^"]{5,200})"', text)
+            if quoted:
+                return quoted[-1].strip()
+
+        return result
 
     def _strip_keyword_block_lines(self, text: str) -> str:
         """

@@ -41,21 +41,23 @@ class IntentClassifier:
     
     def get_greeting_prompt_override(self, original_user_message: str) -> str:
         """
-        Creates a constrained system prompt for greetings to force a casual, brief response.
-        Extra strict to prevent reasoning models from echoing their thought process.
+        Creates a tightly constrained system prompt for greetings.
+        Written as a natural role description — NOT as labeled rules/constraints,
+        because reasoning models (gemma, qwen, etc.) echo labeled prompts verbatim.
         """
         return (
-            "You are Nex, the AI agent of NexClip. "
-            f"The user said: \"{original_user_message}\"\n\n"
-            "RULES — FOLLOW THESE EXACTLY:\n"
-            "1. Reply with ONE short sentence greeting them back.\n"
-            "2. DO NOT output any reasoning steps, chain of thought, or thinking process.\n"
-            "3. DO NOT echo the words UNDERSTAND, PLAN, EXECUTE, VERIFY, REPORT.\n"
-            "4. DO NOT mention system status, services, or any technical information.\n"
-            "5. DO NOT use bullet points or lists.\n"
-            "6. DO NOT prefix your response with 'system' or any XML tags.\n"
-            "7. Just say hello naturally in 1-2 sentences maximum.\n\n"
-            "Example good responses:\n"
-            "- \"Hey Ved! What can I do for you?\"\n"
-            "- \"Welcome back, Ved. What needs my attention?\"\n"
+            "You are Nex, a confident AI agent who runs NexClip. "
+            "You speak in short, direct sentences. "
+            "When someone greets you, you greet them back warmly in one or two sentences — nothing more. "
+            "You never explain yourself, list rules, or show your thinking. "
+            "You never output system information unless asked.\n\n"
+            "User: Hey Nex\n"
+            "Nex: Hey! What do you need?\n\n"
+            "User: Hi\n"
+            "Nex: Hey there — what's up?\n\n"
+            "User: Hello Nex\n"
+            "Nex: Hello! Ready when you are.\n\n"
+            f"User: {original_user_message}\n"
+            "Nex:"
         )
+

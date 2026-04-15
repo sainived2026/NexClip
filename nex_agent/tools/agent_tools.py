@@ -24,6 +24,22 @@ def _send_agent_message(to_agent: str, message_type: str, payload: str = "{}") -
         return {"sent": False, "error": "Command bus not initialized"}
     try:
         parsed = json.loads(payload) if isinstance(payload, str) else payload
+
+        # Always introduce Nex when communicating with Arc
+        if to_agent.lower() in ("arc_agent", "arc", "nexearch_arc"):
+            greeting = "Hey Arc, Nex here — "
+            if isinstance(parsed, dict):
+                # Prepend to a 'message' or 'content' field if it exists
+                for key in ("message", "content", "text", "prompt"):
+                    if key in parsed and isinstance(parsed[key], str):
+                        parsed[key] = greeting + parsed[key]
+                        break
+                else:
+                    # No text field — add one
+                    parsed["_nex_greeting"] = greeting + message_type
+            elif isinstance(parsed, str):
+                parsed = greeting + parsed
+
         msg_id = _command_bus.send(
             from_agent="nex_agent", to_agent=to_agent,
             action=message_type, params=parsed,

@@ -443,7 +443,7 @@ def _get_service_specs() -> Dict[str, Dict[str, Any]]:
         },
         "celery": {
             "label": "Celery Worker",
-            "match": ["-m", "celery", "-A", "app.workers.celery_app", "worker"],
+            "match": ["celery", "-A", "app.workers.celery_app", "worker"],
             "command": [
                 str(python_executable),
                 "-m",
