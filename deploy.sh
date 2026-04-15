@@ -107,19 +107,46 @@ echo ""
 echo "============================================================"
 echo "  Health Checks"
 echo "============================================================"
-check() {
-    local name="$1" url="$2"
+
+# HTTP check for FastAPI services
+check_http() {
+    local label="$1" url="$2" pm2name="$3"
     if curl -sf --max-time 5 "$url" > /dev/null 2>&1; then
-        echo "  ✓  $name"
+        echo "  ✓  $label"
     else
-        echo "  ✗  $name  — run: pm2 logs ${name,,} --lines 30"
+        echo "  ✗  $label  — run: pm2 logs $pm2name --lines 30"
     fi
 }
-check "Backend    " "http://localhost:8000/health"
-check "Nex Agent  " "http://localhost:8001/health"
-check "Nexearch   " "http://localhost:8002/health"
-check "Arc Agent  " "http://localhost:8003/health"
-check "Frontend   " "http://localhost:3000"
+
+# PM2 status check for background workers (no HTTP port)
+check_pm2() {
+    local label="$1" pm2name="$2"
+    local status
+    status=$(pm2 jlist 2>/dev/null | python3 -c "
+import sys, json
+try:
+    procs = json.load(sys.stdin)
+    for p in procs:
+        if p.get('name') == '$pm2name':
+            print(p.get('pm2_env', {}).get('status', 'unknown'))
+            sys.exit(0)
+    print('not_found')
+except Exception as e:
+    print('error')
+" 2>/dev/null || echo "error")
+    if [ "$status" = "online" ]; then
+        echo "  ✓  $label (PM2: online)"
+    else
+        echo "  ✗  $label (PM2: $status) — run: pm2 logs $pm2name --lines 30"
+    fi
+}
+
+check_http "Backend    " "http://localhost:8000/health"  "nexclip-backend"
+check_http "Nex Agent  " "http://localhost:8001/health"  "nexclip-nex-agent"
+check_http "Nexearch   " "http://localhost:8002/health"  "nexclip-nexearch"
+check_http "Arc Agent  " "http://localhost:8003/health"  "nexclip-arc-agent"
+check_http "Frontend   " "http://localhost:3000"          "nexclip-frontend"
+check_pm2  "Celery     " "nexclip-celery"
 
 echo ""
 echo "  Open:  http://${SERVER_IP}:3000"
