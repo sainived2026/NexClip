@@ -13,7 +13,7 @@ module.exports = {
     {
       name: "nexclip-celery",
       script: "../venv/bin/celery",
-      args: "-A app.workers.celery_app worker --loglevel=info --concurrency=4",
+      args: "-A app.workers.celery_app worker --loglevel=info --concurrency=4 -Q video,captions,nexearch,celery",
       cwd: "./backend",
       interpreter: "none",
       env: {

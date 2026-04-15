@@ -573,6 +573,14 @@ export default function NexAgentPage() {
             scrollToBottom();
         }
 
+        else if (type === "thinking") {
+            // Server-side extracted thinking content — populate ThinkingBlock directly
+            const thinkingText = data.content || "";
+            setMessages(prev => prev.map(m =>
+                m.id === messageId ? { ...m, thinking: thinkingText } : m
+            ));
+        }
+
         else if (type === "tool_call") {
             const thinkingLine = buildToolThinkingLabel(data);
             setMessages(prev => prev.map(m =>

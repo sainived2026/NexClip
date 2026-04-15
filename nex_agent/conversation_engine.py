@@ -236,19 +236,39 @@ class ConversationEngine:
                 continue
 
             else:
-                # LLM returned text — validate it
-                is_valid, final_text = validator.validate_and_fix(response.text or "", tool_results_summary)
+                # LLM returned text — extract thinking and clean content
+                raw_text = response.text or ""
+                
+                # Extract <think>...</think> blocks as thinking content
+                import re as _re
+                thinking_content = ""
+                think_match = _re.search(r"<think>(.*?)</think>", raw_text, _re.DOTALL | _re.IGNORECASE)
+                if think_match:
+                    thinking_content = think_match.group(1).strip()
+                    raw_text = _re.sub(r"<think>.*?</think>", "", raw_text, flags=_re.DOTALL | _re.IGNORECASE).strip()
+                
+                # Run the standard validator to strip any remaining leaked reasoning
+                is_valid, final_text = validator.validate_and_fix(raw_text, tool_results_summary)
+                
+                # If validator stripped content that looks like thinking, capture it
+                if not thinking_content and raw_text and final_text != raw_text:
+                    thinking_content = raw_text.replace(final_text, "").strip()
 
-                # Store in conversation history
+                # Store in conversation history (clean text only)
                 self._messages.append({"role": "assistant", "content": final_text})
 
                 # Save to memory
                 self._save_to_memory(user_message, final_text, tool_results_summary)
 
-                # Stream the response
+                # Emit thinking event first (if any)
+                if thinking_content:
+                    yield json.dumps({"type": "thinking", "content": thinking_content})
+
+                # Stream the clean response
                 yield json.dumps({"type": "token", "content": final_text})
-                yield json.dumps({"type": "done"})
+                yield json.dumps({"type": "done", "thinking_content": thinking_content})
                 return
+
 
         # If we hit max iterations, force a text response
         yield json.dumps({

@@ -75,7 +75,7 @@ echo ""
 echo "[3/5] Installing Python dependencies..."
 [ ! -d "$VENV" ] && python3 -m venv "$VENV"
 source "$VENV/bin/activate"
-pip install -q --upgrade pip yt-dlp
+pip install -q --upgrade pip
 REQ="$NEXCLIP_DIR/backend/requirements.txt"
 if [ -f "$REQ" ]; then
     pip install -q -r "$REQ"

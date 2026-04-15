@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -513,6 +513,12 @@ export default function ArcAgentPage() {
             if (data.status === "streaming") { setIsStreaming(true); setAvatarState("responding"); }
             else { setIsStreaming(false); setAvatarState("idle"); }
             scrollToBottom();
+        } else if (type === "thinking") {
+            // Server-side extracted thinking — populate ThinkingBlock directly
+            const thinkingText = data.content || "";
+            setMessages(prev => prev.map(m =>
+                m.id === messageId ? { ...m, thinking: thinkingText } : m
+            ));
         } else if (type === "tool_call") {
             setMessages(prev => prev.map(m =>
                 m.id === messageId ? { ...m, thinking: appendThinkingEntry(m.thinking, buildToolThinkingLabel(data)) } : m
